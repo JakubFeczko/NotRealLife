@@ -9,18 +9,44 @@ import {
   KeyboardAvoidingView,
   ScrollView,
 } from "react-native";
+
+import { useTheme } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function SignInScreen() {
-  // tylko pod UI (żeby pola były "kontrolowane"); możesz to wywalić później
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+
+  const [isSignUp, setIsiSignUp] = useState<boolean>(false);
+  const [email, setEmail] = useState<string>("");
+  const [password, setPassword] = useState<string>("");
+  const [error, setError] = useState<string | null>("");
+
+  const theme = useTheme();
+
+  const handleAuth = async () => {
+    if(!email || !password){
+      setError("Proszę wypełnić wszystkie pola.");
+      return;
+    };
+
+    if(password.length < 6){
+      setError("Hasło musi mieć co najmniej 6 znaków.");
+      return;
+    };
+    
+    setError(null);
+  };
+
+  const handleSwitchMode = () => {
+    setIsiSignUp((prev) => !prev);
+  };
+
+  
 
   return (
     <SafeAreaView style={styles.safe}>
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.select({ ios: "padding", android: undefined })}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
         <ScrollView
           contentContainerStyle={styles.container}
@@ -37,15 +63,14 @@ export default function SignInScreen() {
             </Text>
           </View>
 
-          {/* Card */}
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Logowanie</Text>
+            <Text style={styles.cardTitle}>{isSignUp ? "Rejestracja" : "Logowanie"}</Text>
 
             <Text style={styles.label}>E-mail</Text>
             <TextInput
               value={email}
               onChangeText={setEmail}
-              placeholder="np. anna@mindtracker.com"
+              placeholder="np. example@gmail.com"
               placeholderTextColor="#9CA3AF"
               autoCapitalize="none"
               autoCorrect={false}
@@ -66,18 +91,19 @@ export default function SignInScreen() {
               <Pressable style={styles.showBtn} onPress={() => {}}>
                 <Text style={styles.showText}>Pokaż</Text>
               </Pressable>
+              {error ? <Text style={{ color: theme.colors.error, marginTop: 8 }}>{error}</Text> : null}
             </View>
 
-            <Pressable style={styles.primaryBtn} onPress={() => {}}>
-              <Text style={styles.primaryBtnText}>Zaloguj się</Text>
+            <Pressable style={styles.primaryBtn} onPress={() => {handleAuth();}}>
+              <Text style={styles.primaryBtnText}>{isSignUp ? "Utwórz konto" : "Zaloguj się"}</Text>
             </Pressable>
 
             <View style={styles.linksRow}>
               <Pressable onPress={() => {}}>
-                <Text style={styles.link}>Nie pamiętasz hasła?</Text>
+                <Text style={styles.link}>{isSignUp ? "" : "Nie pamiętasz hasła?"}</Text>
               </Pressable>
-              <Pressable onPress={() => {}}>
-                <Text style={styles.link}>Utwórz konto</Text>
+              <Pressable onPress={() => { handleSwitchMode(); }}>
+                <Text style={styles.link}>{isSignUp ? "Zaloguj się" : "Utwórz konto"}</Text>
               </Pressable>
             </View>
 
@@ -98,7 +124,7 @@ export default function SignInScreen() {
             </Pressable>
 
             <Text style={styles.disclaimer}>
-              Logując się akceptujesz regulamin i politykę prywatności.
+              {isSignUp ? "Rejestrując " : "Logując "}się akceptujesz regulamin i politykę prywatności.
             </Text>
           </View>
 
@@ -161,7 +187,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#E5E7EB",
-    // delikatny "premium" cień
     shadowColor: "#000",
     shadowOpacity: 0.08,
     shadowRadius: 18,
