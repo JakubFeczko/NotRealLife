@@ -12,32 +12,33 @@ import {
 
 import { useTheme } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useAuth } from "../../lib/auth-context";
 
 export default function SignInScreen() {
 
-  const [isSignUp, setIsiSignUp] = useState<boolean>(false);
+  const { signIn, signUp } = useAuth();
+  const [isSignUp, setIsSignUp] = useState<boolean>(false);
   const [email, setEmail] = useState<string>("");
   const [password, setPassword] = useState<string>("");
   const [error, setError] = useState<string | null>("");
 
   const theme = useTheme();
 
-  const handleAuth = async () => {
-    if(!email || !password){
-      setError("Proszę wypełnić wszystkie pola.");
-      return;
-    };
+const handleAuth = async () => {
+  if (!email || !password) {
+    setError("Proszę wypełnić wszystkie pola.");
+    return;
+  }
 
-    if(password.length < 6){
-      setError("Hasło musi mieć co najmniej 6 znaków.");
-      return;
-    };
-    
-    setError(null);
-  };
+  const err = isSignUp
+    ? await signUp(email, password)
+    : await signIn(email, password);
+
+  if (err) setError(err);
+};
 
   const handleSwitchMode = () => {
-    setIsiSignUp((prev) => !prev);
+    setIsSignUp((prev) => !prev);
   };
 
   

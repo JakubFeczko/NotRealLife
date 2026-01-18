@@ -1,23 +1,23 @@
-import { Stack } from "expo-router";
-import React from "react";
+import { Stack, Redirect } from "expo-router";
 import { StatusBar } from "react-native";
+import { AuthProvider, useAuth } from "../lib/auth-context";
 
-const isLoggedIn = true;
+function RootNavigation() {
+  const { isLoggedIn } = useAuth();
+
+  if (!isLoggedIn) {
+    return <Redirect href="/(auth)/auth" />;
+  }
+
+  return <Redirect href="/(tabs)" />;
+}
 
 export default function RootLayout() {
   return (
-    <React.Fragment>
+    <AuthProvider>
       <StatusBar barStyle="dark-content" />
-      <Stack>
-        <Stack.Protected guard={!isLoggedIn}> 
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        </Stack.Protected>
-        
-        <Stack.Protected guard={isLoggedIn}>
-          <Stack.Screen name="(auth)" options={{ headerShown: false }}/>
-        </Stack.Protected>
-        
-      </Stack>
-    </React.Fragment>
+      <Stack screenOptions={{ headerShown: false }} />
+      <RootNavigation />
+    </AuthProvider>
   );
 }
