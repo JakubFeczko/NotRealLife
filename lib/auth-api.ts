@@ -2,6 +2,15 @@ const API_URL = "https://mindtrack-production-7ef2.up.railway.app";
 
 type LoginResponse = {
   access_token: string;
+  refresh_token: string;
+};
+
+type signUpRequest ={
+  accountCreated: boolean;
+};
+
+type verifyEmailResponse = {
+  codeVerified: boolean;
 };
 
 type RefreshResponse = {
@@ -20,6 +29,41 @@ if (!res.ok) {
 }
 
   return await res.json();
+};
+
+export async function signUpRequest(email: string, login: string, password: string): Promise<signUpRequest> {
+  console.log("Rejestracja użytkownika:", email, login, password);
+  const res = await fetch(`${API_URL}/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, login, password }),
+  });
+
+
+  console.log("Response status:", res);
+
+  if (!res.ok) {
+    throw new Error("Nie udało się zarejestrować użytkownika");
+  }
+
+  return await res.json();
+}
+
+export async function verifyEmailResponse(email: string, code: string) {
+  console.log("Weryfikacja kodu dla:", email, code);
+  const res = await fetch(`${API_URL}/auth/codeVerify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, code }),
+  });
+
+  console.log("Response status:", res);
+
+  if (!res.ok) {
+    throw new Error("Invalid code");
+  }
+
+  return res.json();
 }
 
 export async function refreshRequest(accessToken: string) {

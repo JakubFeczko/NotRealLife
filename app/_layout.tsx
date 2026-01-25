@@ -3,10 +3,15 @@ import { StatusBar } from "react-native";
 import { AuthProvider, useAuth } from "../lib/auth-context";
 
 function RootNavigation() {
-  const { isLoggedIn } = useAuth();
+  const { isLoggedIn, hasCompletedOnboarding } = useAuth();
+
 
   if (!isLoggedIn) {
     return <Redirect href="/(auth)/auth" />;
+  }
+
+  if (!hasCompletedOnboarding) {
+    return <Redirect href="/onboarding" />;
   }
 
   return <Redirect href="/(tabs)" />;

@@ -11,38 +11,25 @@ import {
 } from "react-native";
 
 import { useTheme } from "react-native-paper";
+import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../lib/auth-context";
 
 export default function SignInScreen() {
+  const [mode, setMode] = useState<"login" | "register">("login");
 
-  const { signIn, signUp } = useAuth();
-  const [isSignUp, setIsSignUp] = useState<boolean>(false);
-  const [email, setEmail] = useState<string>("");
-  const [password, setPassword] = useState<string>("");
-  const [error, setError] = useState<string | null>("");
+  return (
+    <AuthLayout>
+      {mode === "login" ? (
+        <LoginForm onSwitch={() => setMode("register")} />
+      ) : (
+        <RegisterForm onSwitch={() => setMode("login")} />
+      )}
+    </AuthLayout>
+  );
+}
 
-  const theme = useTheme();
-
-const handleAuth = async () => {
-  if (!email || !password) {
-    setError("Proszę wypełnić wszystkie pola.");
-    return;
-  }
-
-  const err = isSignUp
-    ? await signUp(email, password)
-    : await signIn(email, password);
-
-  if (err) setError(err);
-};
-
-  const handleSwitchMode = () => {
-    setIsSignUp((prev) => !prev);
-  };
-
-  
-
+function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
     <SafeAreaView style={styles.safe}>
       <KeyboardAvoidingView
@@ -57,86 +44,272 @@ const handleAuth = async () => {
             <View style={styles.logoBox}>
               <Text style={styles.logoMark}>〰</Text>
             </View>
-
             <Text style={styles.brand}>Not Real Life</Text>
             <Text style={styles.subtitle}>
-              Zaloguj się i zacznij zyc na 100%.
+              Zaloguj się i zacznij żyć na 100%.
             </Text>
           </View>
 
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>{isSignUp ? "Rejestracja" : "Logowanie"}</Text>
-
-            <Text style={styles.label}>E-mail</Text>
-            <TextInput
-              value={email}
-              onChangeText={setEmail}
-              placeholder="np. example@gmail.com"
-              placeholderTextColor="#9CA3AF"
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="email-address"
-              style={styles.input}
-            />
-
-            <Text style={[styles.label, { marginTop: 14 }]}>Hasło</Text>
-            <View style={styles.passwordRow}>
-              <TextInput
-                value={password}
-                onChangeText={setPassword}
-                placeholder="Minimum 6 znaków"
-                placeholderTextColor="#9CA3AF"
-                secureTextEntry
-                style={[styles.input, styles.passwordInput]}
-              />
-              <Pressable style={styles.showBtn} onPress={() => {}}>
-                <Text style={styles.showText}>Pokaż</Text>
-              </Pressable>
-              {error ? <Text style={{ color: theme.colors.error, marginTop: 8 }}>{error}</Text> : null}
-            </View>
-
-            <Pressable style={styles.primaryBtn} onPress={() => {handleAuth();}}>
-              <Text style={styles.primaryBtnText}>{isSignUp ? "Utwórz konto" : "Zaloguj się"}</Text>
-            </Pressable>
-
-            <View style={styles.linksRow}>
-              <Pressable onPress={() => {}}>
-                <Text style={styles.link}>{isSignUp ? "" : "Nie pamiętasz hasła?"}</Text>
-              </Pressable>
-              <Pressable onPress={() => { handleSwitchMode(); }}>
-                <Text style={styles.link}>{isSignUp ? "Zaloguj się" : "Utwórz konto"}</Text>
-              </Pressable>
-            </View>
-
-            <View style={styles.dividerRow}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>lub</Text>
-              <View style={styles.dividerLine} />
-            </View>
-
-            <Pressable style={styles.socialBtn} onPress={() => {}}>
-              <Text style={styles.socialIcon}>G</Text>
-              <Text style={styles.socialText}>Kontynuuj z Google</Text>
-            </Pressable>
-
-            <Pressable style={styles.socialBtn} onPress={() => {}}>
-              <Text style={styles.socialIcon}></Text>
-              <Text style={styles.socialText}>Kontynuuj z Apple</Text>
-            </Pressable>
-
-            <Text style={styles.disclaimer}>
-              {isSignUp ? "Rejestrując " : "Logując "}się akceptujesz regulamin i politykę prywatności.
-            </Text>
-          </View>
+          {children}
 
           <Text style={styles.tip}>
-            Tip: zapisuj swoje działania codziennie o tej samej porze — łatwiej zobaczysz
-            trend.
+            Tip: zapisuj swoje działania codziennie o tej samej porze — łatwiej
+            zobaczysz trend.
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
+}
+
+function LoginForm({ onSwitch }: { onSwitch: () => void }) {
+  const { signIn } = useAuth();
+  const theme = useTheme();
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const handleLogin = async () => {
+    if (!email || !password) {
+      setError("Proszę wypełnić wszystkie pola.");
+      return;
+    }
+
+    const err = await signIn(email, password);
+    if (err) setError(err);
+  };
+
+  return (
+    <View style={styles.card}>
+      <Text style={styles.cardTitle}>Logowanie</Text>
+
+      <EmailOrUsernameInput value={email} onChange={setEmail} />
+      <PasswordInput value={password} onChange={setPassword} />
+
+      {error && <Text style={{ color: theme.colors.error }}>{error}</Text>}
+
+      <Pressable style={styles.primaryBtn} onPress={handleLogin}>
+        <Text style={styles.primaryBtnText}>Zaloguj się</Text>
+      </Pressable>
+
+      <View style={styles.linksRow}>
+        <Text style={styles.link}>Nie pamiętasz hasła?</Text>
+        <Pressable onPress={onSwitch}>
+          <Text style={styles.link}>Utwórz konto</Text>
+        </Pressable>
+      </View>
+
+      <AuthSocials />
+
+      <Text style={styles.disclaimer}>
+        Logując się akceptujesz regulamin i politykę prywatności.
+      </Text>
+    </View>
+  );
+}
+
+function RegisterForm({ onSwitch }: { onSwitch: () => void }) {
+  const { signUp } = useAuth();
+  const router = useRouter();
+  const theme = useTheme();
+
+  const [email, setEmail] = useState("");
+  const [login, setLogin] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const handleRegister = async () => {
+    const errors = validatePassword(password);
+
+    if (errors.length > 0) {
+      setError(errors.join("\n"));
+      return;
+    }
+
+    if (!email || !password || !login) {
+      setError("Proszę wypełnić wszystkie pola.");
+      return;
+    }
+
+    const err = await signUp(email, login, password);
+    if (err) {
+      setError(err);
+      return;
+    }
+
+    router.push({
+      pathname: "/verify",
+      params: { email },
+    });
+  };
+
+  return (
+    <View style={styles.card}>
+      <Text style={styles.cardTitle}>Rejestracja</Text>
+
+      <EmailOnlyInput value={email} onChange={setEmail} />
+      <AccountNameInput value={login} onChange={setLogin} />
+      <PasswordInput value={password} onChange={setPassword} />
+
+      {error && <Text style={{ color: theme.colors.error }}>{error}</Text>}
+
+      <Pressable style={styles.primaryBtn} onPress={handleRegister}>
+        <Text style={styles.primaryBtnText}>Utwórz konto</Text>
+      </Pressable>
+
+      <View style={styles.linksRow}>
+        <Text style={styles.link} />
+        <Pressable onPress={onSwitch}>
+          <Text style={styles.link}>Zaloguj się</Text>
+        </Pressable>
+      </View>
+
+      <AuthSocials />
+
+      <Text style={styles.disclaimer}>
+        Rejestrując się akceptujesz regulamin i politykę prywatności.
+      </Text>
+    </View>
+  );
+}
+
+function EmailOnlyInput({ value, onChange }: any) {
+  return (
+    <>
+      <Text style={styles.label}>E-mail</Text>
+      <TextInput
+        value={value}
+        onChangeText={onChange}
+        placeholder="E-mail"
+        placeholderTextColor="#9CA3AF"
+        autoCapitalize="none"
+        autoCorrect={false}
+        keyboardType="email-address"
+        style={styles.input}
+      />
+    </>
+  );
+}
+
+function EmailOrUsernameInput({ value, onChange }: any) {
+  return (
+    <>
+      <Text style={styles.label}>E-mail or username</Text>
+      <TextInput
+        value={value}
+        onChangeText={onChange}
+        placeholder="E-mail or username"
+        placeholderTextColor="#9CA3AF"
+        autoCapitalize="none"
+        autoCorrect={false}
+        keyboardType="email-address"
+        style={styles.input}
+      />
+    </>
+  );
+}
+
+function AccountNameInput({ value, onChange }: any) {
+  return (
+    <>
+      <Text style={styles.label}>Nazwa</Text>
+      <TextInput
+        value={value}
+        onChangeText={onChange}
+        placeholder="Username"
+        placeholderTextColor="#9CA3AF"
+        autoCapitalize="none"
+        autoCorrect={false}
+        style={styles.input}
+      />
+    </>
+  );
+}
+
+function PasswordInput({ value, onChange }: any) {
+  const [visible, setVisible] = useState(false);
+
+  return (
+    <>
+      <Text style={[styles.label, { marginTop: 14 }]}>Hasło</Text>
+
+      <View style={styles.passwordRow}>
+        <TextInput
+          value={value}
+          onChangeText={onChange}
+          placeholder="Password"
+          placeholderTextColor="#9CA3AF"
+          secureTextEntry={!visible}
+          style={[styles.input, styles.passwordInput]}
+        />
+
+        <Pressable style={styles.showBtn} onPress={() => setVisible((v) => !v)}>
+          <Text style={styles.showText}>{visible ? "Ukryj" : "Pokaż"}</Text>
+        </Pressable>
+      </View>
+    </>
+  );
+}
+
+function AuthSocials() {
+  return (
+    <>
+      <View style={styles.dividerRow}>
+        <View style={styles.dividerLine} />
+        <Text style={styles.dividerText}>lub</Text>
+        <View style={styles.dividerLine} />
+      </View>
+
+      <Pressable style={styles.socialBtn}>
+        <Text style={styles.socialIcon}>G</Text>
+        <Text style={styles.socialText}>Kontynuuj z Google</Text>
+      </Pressable>
+
+      <Pressable style={styles.socialBtn}>
+        <Text style={styles.socialIcon}></Text>
+        <Text style={styles.socialText}>Kontynuuj z Apple</Text>
+      </Pressable>
+    </>
+  );
+}
+
+function validatePassword(password: string) {
+  const errors: string[] = [];
+
+  if (password.length < 6) {
+    errors.push("Hasło musi mieć co najmniej 6 znaków.");
+    return errors;
+  }
+
+  if (/\s/.test(password)) {
+    errors.push("Hasło nie może zawierać spacji.");
+    return errors;
+  }
+
+  if (!/[0-9]/.test(password)) {
+    errors.push("Hasło musi zawierać przynajmniej jedną cyfrę.");
+    return errors;
+  }
+
+  if (!/[a-zA-Z]/.test(password)) {
+    errors.push("Hasło musi zawierać przynajmniej jedną literę.");
+    return errors;
+  }
+
+  // opcjonalnie: wielka litera
+  if (!/[A-Z]/.test(password)) {
+    errors.push("Hasło powinno zawierać przynajmniej jedną wielką literę.");
+    return errors;
+  }
+
+  // opcjonalnie: znak specjalny
+  if (!/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
+    errors.push("Hasło powinno zawierać przynajmniej jeden znak specjalny.");
+    return errors;
+  }
+
+  return errors;
 }
 
 const styles = StyleSheet.create({
