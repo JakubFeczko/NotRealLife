@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -9,7 +9,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useRoadmaps } from "@/lib/roadmap-context";
 import {
   buildId,
@@ -28,17 +28,13 @@ type DraftTask = {
   title: string;
   notes: string;
   kind: "one_time" | "habit";
+  status: "todo" | "done";
   impact: number;
   difficulty: number;
   dependencies: string[];
   habit: Omit<HabitConfig, "completions">;
+  habitCompletions: string[];
   children: DraftTask[];
-};
-
-type TaskOption = {
-  id: string;
-  title: string;
-  level: number;
 };
 
 function createDraftTask(): DraftTask {
@@ -47,6 +43,7 @@ function createDraftTask(): DraftTask {
     title: "",
     notes: "",
     kind: "one_time",
+    status: "todo",
     impact: 3,
     difficulty: 2,
     dependencies: [],
@@ -56,79 +53,48 @@ function createDraftTask(): DraftTask {
       everyNDays: 2,
       timeOfDay: undefined,
     },
+    habitCompletions: [],
     children: [],
   };
 }
 
-function flattenDraftTasks(tasks: DraftTask[], level = 0): TaskOption[] {
-  return tasks.flatMap((task) => [
-    { id: task.id, title: task.title.trim() || "Nowy task", level },
-    ...flattenDraftTasks(task.children, level + 1),
-  ]);
-}
-
-function collectDescendantIds(task: DraftTask): Set<string> {
-  const ids = new Set<string>();
-  const walk = (node: DraftTask) => {
-    for (const child of node.children) {
-      ids.add(child.id);
-      walk(child);
-    }
+function mapRoadmapTaskToDraft(task: RoadmapTask): DraftTask {
+  return {
+    id: task.id,
+    title: task.title,
+    notes: task.notes ?? "",
+    kind: task.kind,
+    status: task.status,
+    impact: task.impact,
+    difficulty: task.difficulty,
+    dependencies: [...task.dependencies],
+    habit: {
+      startDate: task.habit?.startDate ?? new Date().toISOString().slice(0, 10),
+      durationDays: task.habit?.durationDays ?? 14,
+      everyNDays: task.habit?.everyNDays ?? 2,
+      timeOfDay: task.habit?.timeOfDay,
+    },
+    habitCompletions: task.habit?.completions ?? [],
+    children: task.children.map((child) => mapRoadmapTaskToDraft(child)),
   };
-  walk(task);
-  return ids;
 }
 
-function buildDraftDependencyGraph(tasks: DraftTask[]) {
-  const options = flattenDraftTasks(tasks);
-  const validIds = new Set(options.map((item) => item.id));
-  const graph: Record<string, string[]> = {};
-
-  const walk = (nodes: DraftTask[]) => {
-    for (const task of nodes) {
-      graph[task.id] = [...new Set(task.dependencies.filter((depId) => depId !== task.id && validIds.has(depId)))];
-      walk(task.children);
-    }
-  };
-
-  walk(tasks);
-  return graph;
-}
-
-function hasPath(graph: Record<string, string[]>, fromId: string, toId: string) {
-  const stack = [fromId];
-  const visited = new Set<string>();
-
-  while (stack.length > 0) {
-    const current = stack.pop() as string;
-    if (current === toId) return true;
-    if (visited.has(current)) continue;
-    visited.add(current);
-    for (const next of graph[current] ?? []) {
-      if (!visited.has(next)) stack.push(next);
-    }
-  }
-
-  return false;
-}
-
-function dependencyWouldCreateCycle(tasks: DraftTask[], taskId: string, dependencyId: string) {
-  if (taskId === dependencyId) return true;
-  const graph = buildDraftDependencyGraph(tasks);
-  if (!graph[taskId] || !graph[dependencyId]) return false;
-  if (graph[taskId].includes(dependencyId)) return false;
-  return hasPath(graph, dependencyId, taskId);
+function mapRoadmapTasksToDraft(tasks: RoadmapTask[]): DraftTask[] {
+  return tasks.map((task) => mapRoadmapTaskToDraft(task));
 }
 
 function sanitizeTasks(tasks: DraftTask[]): RoadmapTask[] {
-  const normalized = tasks
-    .filter((task) => task.title.trim().length > 0)
-    .map((task) => ({
+  const normalizeNode = (task: DraftTask): RoadmapTask => {
+    const normalizedChildren = task.children
+      .filter((child) => child.title.trim().length > 0)
+      .map((child) => normalizeNode(child));
+
+    return {
       id: task.id,
       title: task.title.trim(),
       notes: task.notes.trim() || undefined,
       kind: task.kind,
-      status: "todo" as const,
+      status: task.status,
       impact: Math.max(1, Math.min(5, Number(task.impact) || 3)),
       difficulty: Math.max(1, Math.min(3, Number(task.difficulty) || 2)),
       dependencies: [...new Set(task.dependencies)],
@@ -139,41 +105,31 @@ function sanitizeTasks(tasks: DraftTask[]): RoadmapTask[] {
               durationDays: Math.max(1, Number(task.habit.durationDays) || 1),
               everyNDays: Math.max(1, Number(task.habit.everyNDays) || 1),
               startDate: task.habit.startDate || new Date().toISOString().slice(0, 10),
-              completions: [],
+              completions: [...task.habitCompletions],
             }
           : undefined,
-      children: sanitizeTasks(task.children),
-    }));
+      children: normalizedChildren,
+    };
+  };
+
+  const normalized = tasks
+    .filter((task) => task.title.trim().length > 0)
+    .map((task) => normalizeNode(task));
 
   const collectRoadmapTaskIds = (nodes: RoadmapTask[]): string[] =>
     nodes.flatMap((node) => [node.id, ...collectRoadmapTaskIds(node.children)]);
 
   const allTaskIds = new Set(collectRoadmapTaskIds(normalized));
 
-  const collectDescendantRoadmapIds = (task: RoadmapTask): Set<string> => {
-    const ids = new Set<string>();
-    const walk = (node: RoadmapTask) => {
-      for (const child of node.children) {
-        ids.add(child.id);
-        walk(child);
-      }
-    };
-    walk(task);
-    return ids;
-  };
-
-  const sanitizeDependencies = (task: RoadmapTask, ancestorIds: string[] = []): RoadmapTask => {
-    const descendantIds = collectDescendantRoadmapIds(task);
+  const sanitizeDependencies = (task: RoadmapTask): RoadmapTask => {
     return {
       ...task,
       dependencies: task.dependencies.filter(
         (depId) =>
           depId !== task.id &&
-          allTaskIds.has(depId) &&
-          !ancestorIds.includes(depId) &&
-          !descendantIds.has(depId),
+          allTaskIds.has(depId),
       ),
-      children: task.children.map((child) => sanitizeDependencies(child, [...ancestorIds, task.id])),
+      children: task.children.map((child) => sanitizeDependencies(child)),
     };
   };
 
@@ -202,25 +158,44 @@ function countTasks(tasks: DraftTask[]): number {
   return tasks.reduce((acc, task) => acc + 1 + countTasks(task.children), 0);
 }
 
-function getTaskTitleById(tasks: TaskOption[], taskId: string) {
-  return tasks.find((task) => task.id === taskId)?.title ?? taskId;
-}
-
 export default function CreateRoadmapScreen() {
   const router = useRouter();
-  const { createGoal } = useRoadmaps();
+  const { editGoalId } = useLocalSearchParams<{ editGoalId?: string }>();
+  const isEditingFlow = typeof editGoalId === "string" && editGoalId.length > 0;
+  const { goalDraft, setGoalDraft } = useRoadmaps();
   const insets = useSafeAreaInsets();
 
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [domain, setDomain] = useState<GoalDomain>("career");
-  const [tasks, setTasks] = useState<DraftTask[]>([]);
+  const [title, setTitle] = useState(() =>
+    isEditingFlow && goalDraft?.goalId === editGoalId ? goalDraft.title : "",
+  );
+  const [description, setDescription] = useState(() =>
+    isEditingFlow && goalDraft?.goalId === editGoalId ? goalDraft.description ?? "" : "",
+  );
+  const [domain, setDomain] = useState<GoalDomain>(() =>
+    isEditingFlow && goalDraft?.goalId === editGoalId ? goalDraft.domain : "career",
+  );
+  const [tasks, setTasks] = useState<DraftTask[]>(() =>
+    isEditingFlow && goalDraft?.goalId === editGoalId
+      ? mapRoadmapTasksToDraft(goalDraft.tasks)
+      : [],
+  );
   const [error, setError] = useState<string | null>(null);
   const totalDraftTasks = useMemo(() => countTasks(tasks), [tasks]);
-  const taskOptions = useMemo(() => flattenDraftTasks(tasks), [tasks]);
+
+  useEffect(() => {
+    if (!goalDraft) return;
+
+    if (isEditingFlow && goalDraft.goalId !== editGoalId) return;
+    if (!isEditingFlow && goalDraft.goalId) return;
+
+    setTitle(goalDraft.title);
+    setDescription(goalDraft.description ?? "");
+    setDomain(goalDraft.domain);
+    setTasks(mapRoadmapTasksToDraft(goalDraft.tasks));
+  }, [editGoalId, goalDraft, isEditingFlow]);
 
   const addMainTask = () => {
-    setTasks((prev) => [...prev, createDraftTask()]);
+    setTasks((prev) => [createDraftTask(), ...prev]);
   };
 
   const updateTask = (taskId: string, updater: (task: DraftTask) => DraftTask) => {
@@ -232,14 +207,10 @@ export default function CreateRoadmapScreen() {
   };
 
   const addSubtask = (parentId: string) => {
-    updateTask(parentId, (task) => ({ ...task, children: [...task.children, createDraftTask()] }));
+    updateTask(parentId, (task) => ({ ...task, children: [createDraftTask(), ...task.children] }));
   };
 
-  const handleInvalidDependency = () => {
-    setError("Ta zależność tworzy cykl. Zależność nie została dodana.");
-  };
-
-  const saveGoal = async () => {
+  const goToDependenciesStep = () => {
     if (!title.trim()) {
       setError("Dodaj nazwę celu.");
       return;
@@ -252,40 +223,42 @@ export default function CreateRoadmapScreen() {
     }
 
     if (hasDependencyCycle(normalizedTasks)) {
-      setError("Wykryto cykl zależności w taskach. Zmień zależności i spróbuj ponownie.");
+      setError("Wykryto cykl zależności w taskach. Zmień dane i spróbuj ponownie.");
       return;
     }
 
+    setGoalDraft({
+      goalId: isEditingFlow ? editGoalId : undefined,
+      title: title.trim(),
+      description: description.trim() || undefined,
+      domain,
+      tasks: normalizedTasks,
+    });
+
     setError(null);
-
-    try {
-      const created = await createGoal({
-        title,
-        description,
-        domain,
-        tasks: normalizedTasks,
-      });
-
-      router.replace({
-        pathname: "/(tabs)/roadmap/[goalId]",
-        params: { goalId: created.id },
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Nie udało się zapisać celu.");
-    }
+    router.push("/(tabs)/roadmap/dependencies");
   };
 
   return (
     <View style={styles.screen}>
       <View style={styles.bgTop} />
       <View style={styles.bgBottom} />
+
       <View style={[styles.stickyTop, { paddingTop: insets.top + 8 }]}>
         <View style={styles.topRow}>
-          <Pressable onPress={() => router.back()} style={styles.ghostBtn}>
+          <Pressable
+            onPress={() => {
+              if (isEditingFlow) {
+                setGoalDraft(null);
+              }
+              router.back();
+            }}
+            style={styles.ghostBtn}
+          >
             <Text style={styles.ghostText}>← Wróć</Text>
           </Pressable>
-          <Pressable onPress={saveGoal} style={styles.primaryBtnSmall}>
-            <Text style={styles.primaryBtnSmallText}>Zapisz cel</Text>
+          <Pressable onPress={goToDependenciesStep} style={styles.primaryBtnSmall}>
+            <Text style={styles.primaryBtnSmallText}>Dalej: zależności</Text>
           </Pressable>
         </View>
       </View>
@@ -305,9 +278,9 @@ export default function CreateRoadmapScreen() {
           keyboardShouldPersistTaps="handled"
         >
           <Text style={styles.brand}>Not Real Life</Text>
-          <Text style={styles.title}>Nowy cel i roadmapa</Text>
+          <Text style={styles.title}>{isEditingFlow ? "Edycja celu i roadmapy" : "Nowy cel i roadmapa"}</Text>
           <Text style={styles.subtitle}>
-            Dodaj zależności, wpływ i trudność tasków. XP będzie naliczane za realny wpływ.
+            Krok 1 z 2: uzupełnij cel oraz taski. W kolejnym kroku ustawisz zależności i zapiszesz całość.
           </Text>
 
           <View style={styles.card}>
@@ -359,12 +332,9 @@ export default function CreateRoadmapScreen() {
                 key={task.id}
                 task={task}
                 level={0}
-                allTasks={tasks}
-                taskOptions={taskOptions}
                 onUpdate={updateTask}
                 onDelete={removeTask}
                 onAddSubtask={addSubtask}
-                onInvalidDependency={handleInvalidDependency}
               />
             ))}
 
@@ -379,32 +349,16 @@ export default function CreateRoadmapScreen() {
 function TaskEditor({
   task,
   level,
-  ancestorIds = [],
-  allTasks,
-  taskOptions,
   onUpdate,
   onDelete,
   onAddSubtask,
-  onInvalidDependency,
 }: {
   task: DraftTask;
   level: number;
-  ancestorIds?: string[];
-  allTasks: DraftTask[];
-  taskOptions: TaskOption[];
   onUpdate: (taskId: string, updater: (task: DraftTask) => DraftTask) => void;
   onDelete: (taskId: string) => void;
   onAddSubtask: (taskId: string) => void;
-  onInvalidDependency: () => void;
 }) {
-  const descendantIds = collectDescendantIds(task);
-  const dependencyOptions = taskOptions.filter(
-    (option) =>
-      option.id !== task.id &&
-      !descendantIds.has(option.id) &&
-      !ancestorIds.includes(option.id),
-  );
-
   const setTimeOfDay = (value?: TimeOfDay) => {
     onUpdate(task.id, (current) => ({
       ...current,
@@ -413,32 +367,6 @@ function TaskEditor({
         timeOfDay: current.habit.timeOfDay === value ? undefined : value,
       },
     }));
-  };
-
-  const toggleDependency = (dependencyId: string) => {
-    if (ancestorIds.includes(dependencyId) || descendantIds.has(dependencyId)) {
-      onInvalidDependency();
-      return;
-    }
-
-    if (!task.dependencies.includes(dependencyId) && dependencyWouldCreateCycle(allTasks, task.id, dependencyId)) {
-      onInvalidDependency();
-      return;
-    }
-
-    onUpdate(task.id, (current) => {
-      if (current.dependencies.includes(dependencyId)) {
-        return {
-          ...current,
-          dependencies: current.dependencies.filter((item) => item !== dependencyId),
-        };
-      }
-
-      return {
-        ...current,
-        dependencies: [...current.dependencies, dependencyId],
-      };
-    });
   };
 
   return (
@@ -480,54 +408,6 @@ function TaskEditor({
         value={task.difficulty}
         onSelect={(value) => onUpdate(task.id, (current) => ({ ...current, difficulty: value }))}
       />
-
-      <Text style={styles.label}>WYMAGA UKOŃCZENIA</Text>
-      {dependencyOptions.length === 0 ? (
-        <Text style={styles.emptyHintTiny}>Brak innych tasków do ustawienia zależności.</Text>
-      ) : (
-        <View style={styles.dependencyWrap}>
-          {dependencyOptions.map((option) => {
-            const selected = task.dependencies.includes(option.id);
-            const hierarchyRisk = ancestorIds.includes(option.id) || descendantIds.has(option.id);
-            const cycleRisk =
-              !selected &&
-              !hierarchyRisk &&
-              dependencyWouldCreateCycle(allTasks, task.id, option.id);
-            const blocked = hierarchyRisk || cycleRisk;
-
-            return (
-              <Pressable
-                key={option.id}
-                style={[
-                  styles.dependencyChip,
-                  selected && styles.dependencyChipSelected,
-                  blocked && styles.dependencyChipBlocked,
-                ]}
-                onPress={() => toggleDependency(option.id)}
-              >
-                <Text
-                  style={[
-                    styles.dependencyChipText,
-                    selected && styles.dependencyChipTextSelected,
-                    blocked && styles.dependencyChipTextBlocked,
-                  ]}
-                >
-                  {`${option.level > 0 ? "↳ " : ""}${option.title}`}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      )}
-
-      {task.dependencies.length > 0 ? (
-        <Text style={styles.dependencyHint}>
-          Wymagane:{" "}
-          {task.dependencies
-            .map((dependencyId) => getTaskTitleById(taskOptions, dependencyId))
-            .join(", ")}
-        </Text>
-      ) : null}
 
       <View style={styles.kindRow}>
         <Pressable
@@ -638,13 +518,9 @@ function TaskEditor({
           key={child.id}
           task={child}
           level={level + 1}
-          ancestorIds={[...ancestorIds, task.id]}
-          allTasks={allTasks}
-          taskOptions={taskOptions}
           onUpdate={onUpdate}
           onDelete={onDelete}
           onAddSubtask={onAddSubtask}
-          onInvalidDependency={onInvalidDependency}
         />
       ))}
     </View>
@@ -794,8 +670,6 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { fontSize: 16, fontWeight: "800", color: "#F2F7FF" },
   emptyHint: { fontSize: 13, color: "#7992BA", marginBottom: 6 },
-  emptyHintTiny: { fontSize: 12, color: "#7992BA" },
-  dependencyHint: { marginTop: 6, fontSize: 12, color: "#8FA3C6" },
   taskCard: {
     marginTop: 12,
     borderWidth: 1,
@@ -839,20 +713,6 @@ const styles = StyleSheet.create({
   habitTitle: { fontSize: 13, fontWeight: "800", color: "#BEE6FF", marginBottom: 4 },
   twoCols: { flexDirection: "row", gap: 10 },
   chipsRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
-  dependencyWrap: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
-  dependencyChip: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "#1F3A61",
-    backgroundColor: "#0A1424",
-  },
-  dependencyChipSelected: { backgroundColor: "#1A3556", borderColor: "#6FD1FF" },
-  dependencyChipBlocked: { borderColor: "#6A2A3F", backgroundColor: "#2A1320" },
-  dependencyChipText: { color: "#A8B9D7", fontSize: 12, fontWeight: "700" },
-  dependencyChipTextSelected: { color: "#EAF3FF" },
-  dependencyChipTextBlocked: { color: "#FFB0C2" },
   scaleRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
   scaleChip: {
     minWidth: 32,

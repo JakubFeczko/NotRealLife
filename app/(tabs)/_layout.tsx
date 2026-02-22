@@ -1,5 +1,6 @@
-import { Redirect } from "expo-router";
-import { NativeTabs, Icon, Label, Badge } from "expo-router/unstable-native-tabs";
+import { Ionicons } from "@expo/vector-icons";
+import { Redirect, Tabs } from "expo-router";
+import { useWindowDimensions } from "react-native";
 import { useAuth } from "@/lib/auth-context";
 import { useHabits } from "@/lib/habit-context";
 import { useRoadmaps } from "@/lib/roadmap-context";
@@ -37,10 +38,30 @@ export default function TabLayout() {
   const { isLoggedIn } = useAuth();
   const { goals } = useRoadmaps();
   const { customHabits, loading: habitsLoading } = useHabits();
+  const { width } = useWindowDimensions();
 
   if (!isLoggedIn) {
     return <Redirect href="/(auth)/welcome" />;
   }
+
+  const isCompactTabs = width < 390;
+  const isVeryCompactTabs = width < 360;
+  const tabFontSize = isVeryCompactTabs ? 9 : isCompactTabs ? 10 : 11;
+  const tabLabels = isCompactTabs
+    ? {
+        home: "Home",
+        habits: "Habits",
+        roadmap: "Roadmap",
+        statistics: "Stats",
+        settings: "Settings",
+      }
+    : {
+        home: "Home",
+        habits: "Habits",
+        roadmap: "RoadMap",
+        statistics: "Statistics",
+        settings: "Settings",
+      };
 
   const today = todayIsoDate();
   const customHabitsRemaining = habitsLoading
@@ -59,30 +80,99 @@ export default function TabLayout() {
   const habitsBadgeCount = getRoadmapHabitsRemainingToday(goals) + customHabitsRemaining;
 
   return (
-    <NativeTabs>
-      <NativeTabs.Trigger name="index">
-        <Label>Home</Label>
-        <Icon sf="house.fill" drawable="custom_android_drawable" selectedColor='black'/>
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="habbits">
-        <Icon sf="list.bullet" drawable="custom_settings_drawable" selectedColor='black' />
-        <Label>Habbits</Label>
-        {habitsBadgeCount > 0 ? (
-          <Badge selectedBackgroundColor="black">{String(habitsBadgeCount)}</Badge>
-        ) : null}
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="roadmap">
-        <Icon sf="map" drawable="custom_settings_drawable" selectedColor='black'/>
-        <Label>RoadMap</Label>
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="statistics">
-        <Icon sf="chart.bar" drawable="custom_settings_drawable" selectedColor='black'/>
-        <Label>Statistics</Label>
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="settings">
-        <Icon sf="gear" drawable="custom_settings_drawable" selectedColor='black'/>
-        <Label>Settings</Label>
-      </NativeTabs.Trigger>
-    </NativeTabs>
+    <Tabs
+      screenOptions={{
+        headerShown: false,
+        tabBarActiveTintColor: "#EAF4FF",
+        tabBarInactiveTintColor: "#8CA9D3",
+        tabBarAllowFontScaling: false,
+        tabBarHideOnKeyboard: true,
+        tabBarLabelPosition: "below-icon",
+        tabBarStyle: {
+          backgroundColor: "#0A1424",
+          borderTopColor: "#1F3A61",
+          borderTopWidth: 1,
+          height: isVeryCompactTabs ? 68 : 72,
+          paddingTop: isVeryCompactTabs ? 6 : 8,
+          paddingBottom: isVeryCompactTabs ? 6 : 8,
+        },
+        tabBarItemStyle: {
+          paddingVertical: isVeryCompactTabs ? 1 : 2,
+        },
+        tabBarLabelStyle: {
+          fontSize: tabFontSize,
+          fontWeight: "700",
+        },
+      }}
+    >
+      <Tabs.Screen
+        name="index"
+        options={{
+          title: "Home",
+          tabBarLabel: tabLabels.home,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="home-outline" size={size} color={color} />
+          ),
+        }}
+      />
+
+      <Tabs.Screen
+        name="habbits"
+        options={{
+          title: "Habbits",
+          tabBarLabel: tabLabels.habits,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="list-outline" size={size} color={color} />
+          ),
+          tabBarBadge: habitsBadgeCount > 0 ? habitsBadgeCount : undefined,
+          tabBarBadgeStyle: {
+            backgroundColor: "#22354A",
+            color: "#EAF4FF",
+            fontSize: 10,
+            fontWeight: "800",
+          },
+        }}
+      />
+
+      <Tabs.Screen
+        name="roadmap"
+        options={{
+          title: "RoadMap",
+          tabBarLabel: tabLabels.roadmap,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="map-outline" size={size} color={color} />
+          ),
+        }}
+      />
+
+      <Tabs.Screen
+        name="statistics"
+        options={{
+          title: "Statistics",
+          tabBarLabel: tabLabels.statistics,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="bar-chart-outline" size={size} color={color} />
+          ),
+        }}
+      />
+
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: "Settings",
+          tabBarLabel: tabLabels.settings,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="settings-outline" size={size} color={color} />
+          ),
+        }}
+      />
+
+      <Tabs.Screen
+        name="weekly-review"
+        options={{
+          href: null,
+        }}
+      />
+    </Tabs>
   );
 }

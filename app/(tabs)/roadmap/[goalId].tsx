@@ -19,7 +19,13 @@ export default function RoadmapDetailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { goalId } = useLocalSearchParams<{ goalId: string }>();
-  const { getGoalById, markOneTimeTaskDone, addHabitCompletion, removeGoal } = useRoadmaps();
+  const {
+    getGoalById,
+    markOneTimeTaskDone,
+    addHabitCompletion,
+    removeGoal,
+    setGoalDraft,
+  } = useRoadmaps();
 
   const goal = goalId ? getGoalById(goalId) : undefined;
   const today = todayIsoDate();
@@ -83,16 +89,37 @@ export default function RoadmapDetailScreen() {
           <Pressable onPress={() => router.back()} style={styles.ghostBtn}>
             <Text style={styles.ghostText}>← Wróć</Text>
           </Pressable>
+          <View style={styles.actionsRight}>
+            <Pressable
+              onPress={() => {
+                setGoalDraft({
+                  goalId: goal.id,
+                  title: goal.title,
+                  description: goal.description,
+                  domain: goal.domain,
+                  tasks: goal.tasks,
+                });
 
-          <Pressable
-            onPress={async () => {
-              await removeGoal(goal.id);
-              router.replace("/(tabs)/roadmap");
-            }}
-            style={styles.deleteBtn}
-          >
-            <Text style={styles.deleteBtnText}>Usuń cel</Text>
-          </Pressable>
+                router.push({
+                  pathname: "/(tabs)/roadmap/create",
+                  params: { editGoalId: goal.id },
+                });
+              }}
+              style={styles.editBtn}
+            >
+              <Text style={styles.editBtnText}>Edycja</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={async () => {
+                await removeGoal(goal.id);
+                router.replace("/(tabs)/roadmap");
+              }}
+              style={styles.deleteBtn}
+            >
+              <Text style={styles.deleteBtnText}>Usuń cel</Text>
+            </Pressable>
+          </View>
         </View>
 
         <Text style={styles.brand}>Not Real Life</Text>
@@ -273,6 +300,7 @@ const styles = StyleSheet.create({
   },
   container: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 28, gap: 12 },
   topRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  actionsRight: { flexDirection: "row", alignItems: "center", gap: 8 },
   ghostBtn: {
     paddingVertical: 7,
     paddingHorizontal: 12,
@@ -282,6 +310,15 @@ const styles = StyleSheet.create({
     borderColor: "#DFE3D2",
   },
   ghostText: { color: "#E7F0FF", fontWeight: "700", fontSize: 13 },
+  editBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    backgroundColor: "#0F1B2E",
+    borderWidth: 1,
+    borderColor: "#1F3A61",
+  },
+  editBtnText: { color: "#D3E6FF", fontWeight: "800", fontSize: 12 },
   deleteBtn: {
     paddingVertical: 8,
     paddingHorizontal: 12,

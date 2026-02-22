@@ -49,13 +49,30 @@ type CustomHabitXpInput = {
   date: string; // YYYY-MM-DD
 };
 
+export type RoadmapGoalDraft = {
+  goalId?: string;
+  title: string;
+  description?: string;
+  domain: GoalDomain;
+  tasks: RoadmapTask[];
+};
+
 type RoadmapContextType = {
   goals: RoadmapGoal[];
   loading: boolean;
   progress: ProgressSnapshot;
   xpEvents: XpEvent[];
   weeklyReviews: WeeklyReviewEntry[];
+  goalDraft: RoadmapGoalDraft | null;
+  setGoalDraft: (draft: RoadmapGoalDraft | null) => void;
   createGoal: (payload: {
+    title: string;
+    description?: string;
+    domain: GoalDomain;
+    tasks: RoadmapTask[];
+  }) => Promise<RoadmapGoal>;
+  updateGoal: (payload: {
+    goalId: string;
     title: string;
     description?: string;
     domain: GoalDomain;
@@ -77,17 +94,26 @@ function clamp(raw: number, min: number, max: number) {
 }
 
 function normalizeTaskTree(tasks: RoadmapTask[]): RoadmapTask[] {
-  const normalized = tasks.map((task) => ({
+  const normalizeNode = (task: RoadmapTask): RoadmapTask => ({
     ...task,
     impact: clamp(Number(task.impact) || 3, 1, 5),
     difficulty: clamp(Number(task.difficulty) || 2, 1, 3),
     dependencies: Array.isArray(task.dependencies)
       ? task.dependencies.filter((item) => typeof item === "string")
       : [],
-    children: normalizeTaskTree(task.children ?? []),
-  }));
+    children: (task.children ?? []).map((child) => normalizeNode(child)),
+  });
+
+  const normalized = tasks.map((task) => normalizeNode(task));
 
   const idSet = new Set(flattenTasks(normalized).map((task) => task.id));
+
+  type TaskMeta = {
+    level: number;
+    parentId?: string;
+    rootTaskId: string;
+    descendantIds: Set<string>;
+  };
 
   const collectDescendantIds = (task: RoadmapTask): Set<string> => {
     const ids = new Set<string>();
@@ -101,8 +127,47 @@ function normalizeTaskTree(tasks: RoadmapTask[]): RoadmapTask[] {
     return ids;
   };
 
-  const sanitizeDependencies = (task: RoadmapTask, ancestorIds: string[] = []): RoadmapTask => {
-    const descendantIds = collectDescendantIds(task);
+  const taskMetaMap: Record<string, TaskMeta> = {};
+
+  const collectTaskMeta = (
+    nodes: RoadmapTask[],
+    level = 0,
+    parentId?: string,
+    rootTaskId?: string,
+  ) => {
+    for (const node of nodes) {
+      const currentRootTaskId = rootTaskId ?? node.id;
+      taskMetaMap[node.id] = {
+        level,
+        parentId,
+        rootTaskId: currentRootTaskId,
+        descendantIds: collectDescendantIds(node),
+      };
+      collectTaskMeta(node.children, level + 1, node.id, currentRootTaskId);
+    }
+  };
+
+  collectTaskMeta(normalized);
+
+  const isDependencyAllowed = (taskId: string, dependencyId: string) => {
+    const taskMeta = taskMetaMap[taskId];
+    const dependencyMeta = taskMetaMap[dependencyId];
+    if (!taskMeta || !dependencyMeta) return false;
+
+    // Top-level task: can depend only on its own subtasks.
+    if (taskMeta.level === 0) {
+      return taskMeta.descendantIds.has(dependencyId);
+    }
+
+    // Subtask: can depend on sibling subtasks (same parent) or other top-level tasks.
+    const siblingOfSameParent =
+      dependencyMeta.parentId === taskMeta.parentId && dependencyId !== taskId;
+    const otherTopLevelTask =
+      dependencyMeta.level === 0 && dependencyId !== taskMeta.rootTaskId;
+    return siblingOfSameParent || otherTopLevelTask;
+  };
+
+  const sanitizeDependencies = (task: RoadmapTask): RoadmapTask => {
     return {
       ...task,
       dependencies: [
@@ -111,12 +176,11 @@ function normalizeTaskTree(tasks: RoadmapTask[]): RoadmapTask[] {
             (depId) =>
               depId !== task.id &&
               idSet.has(depId) &&
-              !ancestorIds.includes(depId) &&
-              !descendantIds.has(depId),
+              isDependencyAllowed(task.id, depId),
           ),
         ),
       ],
-      children: task.children.map((child) => sanitizeDependencies(child, [...ancestorIds, task.id])),
+      children: task.children.map((child) => sanitizeDependencies(child)),
     };
   };
 
@@ -173,6 +237,7 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
   const [goals, setGoals] = useState<RoadmapGoal[]>([]);
   const [xpEvents, setXpEvents] = useState<XpEvent[]>([]);
   const [weeklyReviews, setWeeklyReviews] = useState<WeeklyReviewEntry[]>([]);
+  const [goalDraft, setGoalDraft] = useState<RoadmapGoalDraft | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -213,6 +278,8 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
       progress,
       xpEvents,
       weeklyReviews,
+      goalDraft,
+      setGoalDraft,
       createGoal: async ({ title, description, domain, tasks }) => {
         const now = new Date().toISOString();
         const normalizedTasks = normalizeTaskTree(tasks);
@@ -233,6 +300,37 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
 
         setGoals((prev) => [goal, ...prev]);
         return goal;
+      },
+      updateGoal: async ({ goalId, title, description, domain, tasks }) => {
+        const now = new Date().toISOString();
+        const normalizedTasks = normalizeTaskTree(tasks);
+
+        if (hasDependencyCycle(normalizedTasks)) {
+          throw new Error("Taski zawierają cykl zależności. Popraw zależności i zapisz ponownie.");
+        }
+
+        let updatedGoal: RoadmapGoal | null = null;
+        setGoals((prev) =>
+          prev.map((goal) => {
+            if (goal.id !== goalId) return goal;
+            const nextGoal: RoadmapGoal = {
+              ...goal,
+              title: title.trim(),
+              description: description?.trim(),
+              domain,
+              updatedAt: now,
+              tasks: normalizedTasks,
+            };
+            updatedGoal = nextGoal;
+            return nextGoal;
+          }),
+        );
+
+        if (!updatedGoal) {
+          throw new Error("Nie znaleziono celu do edycji.");
+        }
+
+        return updatedGoal;
       },
       getGoalById: (goalId) => goals.find((g) => g.id === goalId),
       markOneTimeTaskDone: async (goalId, taskId) => {
@@ -466,7 +564,7 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
         return weeklyReviews.find((review) => review.weekKey === weekKey);
       },
     }),
-    [goals, loading, progress, weeklyReviews, xpEvents],
+    [goalDraft, goals, loading, progress, weeklyReviews, xpEvents],
   );
 
   return <RoadmapContext.Provider value={value}>{children}</RoadmapContext.Provider>;
