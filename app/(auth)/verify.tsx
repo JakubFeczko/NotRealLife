@@ -59,36 +59,32 @@ export default function VerifyScreen() {
     }
 
     const finalCode = code.join("");
-    console.log("VERIFY:", email, finalCode);
-
     const err = await verifyEmail(email!, finalCode);
     if (err) {
       setError(err);
       return;
     }
-    Alert.alert(
-      "Konto zweryfikowane",
-      "Możesz się teraz zalogować.",
-      [
-        {
-          text: "OK",
-          onPress: () => {
-            router.replace("/auth");
-          },
+
+    Alert.alert("Konto zweryfikowane", "Możesz się teraz zalogować.", [
+      {
+        text: "OK",
+        onPress: () => {
+          router.replace("/(auth)/login");
         },
-      ],
-      { cancelable: false },
-    );
+      },
+    ]);
   };
 
   const handleResend = () => {
     if (seconds > 0) return;
     setSeconds(RESEND_SECONDS);
-    // resendVerificationCode(email!)
   };
 
   return (
     <SafeAreaView style={styles.safe}>
+      <View style={styles.bgTop} />
+      <View style={styles.bgBottom} />
+
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -99,15 +95,13 @@ export default function VerifyScreen() {
         >
           <View style={styles.header}>
             <Text style={styles.brand}>Not Real Life</Text>
-            <Text style={styles.subtitle}>Podaj kod wysłany na maila</Text>
+            <Text style={styles.title}>Potwierdź konto i działaj</Text>
+            <Text style={styles.subtitle}>Wpisz kod wysłany na e-mail.</Text>
           </View>
 
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Weryfikacja e-maila</Text>
-
             <Text style={styles.description}>
-              Na adres <Text style={styles.email}>{email}</Text> wysłaliśmy
-              5-cyfrowy kod aktywacyjny.
+              Wysłaliśmy 5-cyfrowy kod na <Text style={styles.email}>{email}</Text>
             </Text>
 
             <View style={styles.codeRow}>
@@ -129,10 +123,10 @@ export default function VerifyScreen() {
               ))}
             </View>
 
-            {error && <Text style={styles.error}>{error}</Text>}
+            {error ? <Text style={styles.error}>{error}</Text> : null}
 
             <Pressable style={styles.primaryBtn} onPress={handleSubmit}>
-              <Text style={styles.primaryBtnText}>Dalej</Text>
+              <Text style={styles.primaryBtnText}>Potwierdź kod</Text>
             </Pressable>
 
             <Pressable onPress={handleResend} style={styles.resend}>
@@ -148,6 +142,8 @@ export default function VerifyScreen() {
                 </Text>
               </Text>
             </Pressable>
+
+            <Text style={styles.supportText}>Każdy nawyk zaczyna się od jednej decyzji.</Text>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -157,124 +153,139 @@ export default function VerifyScreen() {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  safe: { flex: 1, backgroundColor: "#FFFFFF" },
-
+  safe: { flex: 1, backgroundColor: "#060B14" },
   container: {
-    paddingHorizontal: 18,
+    flexGrow: 1,
+    justifyContent: "center",
+    paddingHorizontal: 20,
     paddingTop: 18,
-    paddingBottom: 26,
+    paddingBottom: 28,
+    gap: 16,
   },
-
-  header: {
-    alignItems: "center",
-    marginBottom: 16,
+  bgTop: {
+    position: "absolute",
+    top: -120,
+    right: -40,
+    width: 280,
+    height: 280,
+    borderRadius: 140,
+    backgroundColor: "#152B50",
   },
-
+  bgBottom: {
+    position: "absolute",
+    bottom: -140,
+    left: -50,
+    width: 300,
+    height: 300,
+    borderRadius: 150,
+    backgroundColor: "#0E223F",
+  },
+  header: { gap: 6 },
   brand: {
-    fontSize: 30,
+    alignSelf: "flex-start",
+    fontSize: 11,
     fontWeight: "800",
-    color: "#0B0B0F",
+    letterSpacing: 0.8,
+    color: "#8DD8FF",
+    backgroundColor: "rgba(26,55,86,0.45)",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    overflow: "hidden",
   },
-
+  title: {
+    fontSize: 31,
+    lineHeight: 36,
+    fontWeight: "900",
+    color: "#F2F7FF",
+  },
   subtitle: {
-    marginTop: 6,
     fontSize: 14,
-    color: "#4B5563",
-    textAlign: "center",
+    lineHeight: 20,
+    color: "#A8B9D7",
   },
-
   card: {
     borderRadius: 24,
-    padding: 16,
-    backgroundColor: "#FFFFFF",
+    padding: 18,
+    backgroundColor: "#0A1424",
     borderWidth: 1,
-    borderColor: "#E5E7EB",
-    shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 4,
+    borderColor: "#1F3A61",
+    shadowColor: "#606A5D",
+    shadowOpacity: 0.14,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 5,
   },
-
-  cardTitle: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: "#0B0B0F",
-    marginBottom: 8,
-  },
-
   description: {
     fontSize: 13,
-    color: "#4B5563",
-    lineHeight: 18,
-    marginBottom: 18,
+    color: "#A8B9D7",
+    lineHeight: 19,
+    marginBottom: 16,
   },
-
   email: {
-    color: "#0B0B0F",
+    color: "#F2F7FF",
     fontWeight: "800",
   },
-
   codeRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 14,
+    marginBottom: 12,
   },
-
   codeInput: {
     width: 52,
     height: 56,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#E5E7EB",
-    backgroundColor: "#FAFAFA",
+    borderColor: "#1F3A61",
+    backgroundColor: "#0B1729",
     textAlign: "center",
     fontSize: 20,
     fontWeight: "800",
-    color: "#0B0B0F",
+    color: "#F2F7FF",
   },
-
   codeInputActive: {
-    borderColor: "#0B0B0F",
+    borderColor: "#6FD1FF",
   },
-
   error: {
-    color: "#EF4444",
+    color: "#C63B3B",
     marginBottom: 8,
     fontSize: 12,
+    fontWeight: "600",
   },
-
   primaryBtn: {
-    marginTop: 10,
+    marginTop: 6,
     height: 52,
     borderRadius: 18,
-    backgroundColor: "#0B0B0F",
+    backgroundColor: "#22354A",
     alignItems: "center",
     justifyContent: "center",
   },
-
   primaryBtnText: {
     color: "#FFFFFF",
     fontWeight: "900",
     fontSize: 16,
   },
-
   resend: {
     marginTop: 12,
     alignItems: "center",
   },
-
   resendText: {
-    fontSize: 12,
-    color: "#6B7280",
+    fontSize: 13,
+    color: "#A8B9D7",
+    textAlign: "center",
   },
-
   resendActive: {
-    color: "#0B0B0F",
+    color: "#E7F0FF",
     fontWeight: "800",
   },
-
   resendDisabled: {
-    color: "#9CA3AF",
+    color: "#98A398",
+    fontWeight: "700",
+  },
+  supportText: {
+    marginTop: 12,
+    textAlign: "center",
+    color: "#7992BA",
+    fontSize: 12,
   },
 });

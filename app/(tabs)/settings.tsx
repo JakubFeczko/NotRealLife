@@ -5,12 +5,16 @@ import {
   StyleSheet,
   Pressable,
   Alert,
+  ScrollView,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../../lib/auth-context";
+import { useRouter } from "expo-router";
 
 export default function SettingsScreen() {
   const { signOut } = useAuth();
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   const handleSignOut = () => {
     Alert.alert(
@@ -21,60 +25,89 @@ export default function SettingsScreen() {
         {
           text: "Wyloguj",
           style: "destructive",
-          onPress: signOut,
+          onPress: logOut,
         },
-      ]
+      ],
     );
   };
 
-  return (
-    <SafeAreaView style={styles.safe}>
-      <View style={styles.container}>
-        <Text style={styles.title}>Ustawienia</Text>
+  const logOut = async () => {
+    const err = await signOut();
+    if (err) {
+      Alert.alert("Wylogowano lokalnie", err);
+    }
+    router.replace("/(auth)/welcome");
+  };
 
-        <View style={styles.card}>
-          <SettingsRow label="Profil" />
+  return (
+    <View style={styles.screen}>
+      <View style={styles.bgTop} />
+      <View style={styles.bgBottom} />
+
+      <ScrollView
+        contentContainerStyle={{
+          paddingTop: insets.top + 12,
+          paddingBottom: insets.bottom + 120,
+          paddingHorizontal: 20,
+          gap: 12,
+        }}
+      >
+        <Text style={styles.brand}>Not Real Life</Text>
+        <Text style={styles.title}>Ustawienia</Text>
+        <Text style={styles.subtitle}>Ustaw preferencje i zarządzaj kontem.</Text>
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Konto</Text>
+          <SettingsRow label="Profil" meta="Wkrótce" />
           <Divider />
-          <SettingsRow label="Powiadomienia" />
+          <SettingsRow label="Powiadomienia" meta="Wkrótce" />
           <Divider />
-          <SettingsRow label="O aplikacji" />
+          <SettingsRow label="Prywatność" meta="Wkrótce" />
+        </View>
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Aplikacja</Text>
+          <SettingsRow label="O aplikacji" meta="v1.0.0" />
           <Divider />
+          <SettingsRow label="Wsparcie" meta="Wkrótce" />
+        </View>
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Rozwój</Text>
           <SettingsRow
-            label="Wyloguj się"
-            destructive
-            onPress={handleSignOut}
+            label="Weekly Boss Review"
+            meta="Test"
+            onPress={() => router.push("/(tabs)/weekly-review" as never)}
           />
         </View>
-      </View>
-    </SafeAreaView>
+
+        <Pressable
+          style={({ pressed }) => [styles.logoutBtn, pressed && styles.logoutBtnPressed]}
+          onPress={handleSignOut}
+        >
+          <Text style={styles.logoutText}>Wyloguj się</Text>
+        </Pressable>
+      </ScrollView>
+    </View>
   );
 }
 
 function SettingsRow({
   label,
+  meta,
   onPress,
-  destructive = false,
 }: {
   label: string;
+  meta?: string;
   onPress?: () => void;
-  destructive?: boolean;
 }) {
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.row,
-        pressed && styles.rowPressed,
-      ]}
-    >
-      <Text
-        style={[
-          styles.rowText,
-          destructive && styles.destructiveText,
-        ]}
-      >
-        {label}
-      </Text>
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}>
+      <Text style={styles.rowText}>{label}</Text>
+      <View style={styles.rowRight}>
+        {meta ? <Text style={styles.metaText}>{meta}</Text> : null}
+        <Text style={styles.rowArrow}>›</Text>
+      </View>
     </Pressable>
   );
 }
@@ -84,56 +117,80 @@ function Divider() {
 }
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: "#FFFFFF",
+  screen: { flex: 1, backgroundColor: "#060B14" },
+  bgTop: {
+    position: "absolute",
+    top: -120,
+    right: -40,
+    width: 280,
+    height: 280,
+    borderRadius: 140,
+    backgroundColor: "#152B50",
   },
-
-  container: {
-    padding: 18,
+  bgBottom: {
+    position: "absolute",
+    bottom: -140,
+    left: -50,
+    width: 300,
+    height: 300,
+    borderRadius: 150,
+    backgroundColor: "#0E223F",
   },
-
-  title: {
-    fontSize: 24,
+  brand: {
+    alignSelf: "flex-start",
+    fontSize: 11,
     fontWeight: "800",
-    color: "#0B0B0F",
-    marginBottom: 12,
+    letterSpacing: 0.8,
+    color: "#8DD8FF",
+    backgroundColor: "rgba(26,55,86,0.45)",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    overflow: "hidden",
   },
-
-  card: {
-    borderRadius: 24,
-    backgroundColor: "#FFFFFF",
+  title: { fontSize: 30, lineHeight: 34, fontWeight: "900", color: "#F2F7FF" },
+  subtitle: { fontSize: 14, lineHeight: 20, color: "#A8B9D7" },
+  sectionCard: {
+    borderRadius: 20,
+    backgroundColor: "#0A1424",
     borderWidth: 1,
-    borderColor: "#E5E7EB",
-    shadowColor: "#000",
-    shadowOpacity: 0.06,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 3,
+    borderColor: "#1F3A61",
+    overflow: "hidden",
   },
-
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: "#F2F7FF",
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 8,
+  },
   row: {
-    paddingVertical: 16,
-    paddingHorizontal: 18,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
-
-  rowPressed: {
-    backgroundColor: "#F3F4F6",
-  },
-
-  rowText: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#111827",
-  },
-
-  destructiveText: {
-    color: "#DC2626",
-  },
-
+  rowPressed: { backgroundColor: "#0F1B2E" },
+  rowText: { fontSize: 15, fontWeight: "700", color: "#EAF3FF" },
+  rowRight: { flexDirection: "row", alignItems: "center", gap: 10 },
+  metaText: { fontSize: 12, color: "#7992BA", fontWeight: "700" },
+  rowArrow: { fontSize: 20, color: "#8CA9D3", fontWeight: "800" },
   divider: {
     height: 1,
-    backgroundColor: "#E5E7EB",
-    marginLeft: 18,
+    backgroundColor: "#1F3A61",
+    marginLeft: 16,
   },
+  logoutBtn: {
+    height: 52,
+    borderRadius: 16,
+    backgroundColor: "#2A1320",
+    borderWidth: 1,
+    borderColor: "#6A2A3F",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  logoutBtnPressed: { backgroundColor: "#341827" },
+  logoutText: { color: "#FFB0C2", fontWeight: "900", fontSize: 15 },
 });

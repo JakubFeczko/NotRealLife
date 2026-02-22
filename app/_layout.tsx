@@ -1,28 +1,18 @@
-import { Stack, Redirect } from "expo-router";
+import { Stack } from "expo-router";
 import { StatusBar } from "react-native";
-import { AuthProvider, useAuth } from "../lib/auth-context";
-
-function RootNavigation() {
-  const { isLoggedIn, hasCompletedOnboarding } = useAuth();
-
-
-  if (!isLoggedIn) {
-    return <Redirect href="/(auth)/auth" />;
-  }
-
-  if (!hasCompletedOnboarding) {
-    return <Redirect href="/onboarding" />;
-  }
-
-  return <Redirect href="/(tabs)" />;
-}
+import { AuthProvider } from "../lib/auth-context";
+import { HabitProvider } from "../lib/habit-context";
+import { RoadmapProvider } from "../lib/roadmap-context";
 
 export default function RootLayout() {
   return (
     <AuthProvider>
-      <StatusBar barStyle="dark-content" />
-      <Stack screenOptions={{ headerShown: false }} />
-      <RootNavigation />
+      <HabitProvider>
+        <RoadmapProvider>
+          <StatusBar barStyle="dark-content" />
+          <Stack screenOptions={{ headerShown: false }} />
+        </RoadmapProvider>
+      </HabitProvider>
     </AuthProvider>
   );
 }

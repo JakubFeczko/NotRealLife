@@ -1,9 +1,18 @@
-import { Stack, Tabs } from "expo-router";
+import { Redirect, Stack } from "expo-router";
+import { useAuth } from "@/lib/auth-context";
 
-export default function TabLayout() {
+export default function AuthLayout() {
+  const { isLoggedIn } = useAuth();
+
+  if (isLoggedIn) {
+    return <Redirect href="/(tabs)" />;
+  }
+
   return (
-    <Stack>
-      <Stack.Screen name="auth" options={{ headerShown: false }} />
-    </Stack>
+    <Stack
+      screenOptions={{
+        headerShown: false,
+      }}
+    />
   );
 }

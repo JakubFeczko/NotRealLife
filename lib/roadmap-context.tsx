@@ -1,0 +1,486 @@
+import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { getRoadmapGoals, saveRoadmapGoals } from "./roadmap-storage";
+import {
+  buildDependentsCountMap,
+  buildId,
+  buildTaskMap,
+  flattenTasks,
+  getBlockedByTaskIds,
+  GoalDomain,
+  hasDependencyCycle,
+  isTaskBlocked,
+  RoadmapGoal,
+  RoadmapTask,
+  taskIsDone,
+} from "./roadmap-types";
+import { isCompletionOnDate, isHabitDueOnDate, todayIsoDate } from "./habit-types";
+import {
+  buildProgressSnapshot,
+  getWeekKey,
+  ProgressSnapshot,
+  WeeklyReviewEntry,
+  WeeklyReviewInput,
+  XpEvent,
+} from "./progression-types";
+import {
+  getWeeklyReviews,
+  getXpEvents,
+  saveWeeklyReviews,
+  saveXpEvents,
+} from "./progression-storage";
+
+type TaskCompletionResult = {
+  ok: boolean;
+  xpAwarded: number;
+  reason?: string;
+};
+
+type WeeklyReviewResult = {
+  entry: WeeklyReviewEntry;
+  xpAwarded: number;
+  alreadyAwardedForWeek: boolean;
+};
+
+type CustomHabitXpInput = {
+  habitId: string;
+  domain: GoalDomain;
+  impact: number;
+  difficulty: number;
+  date: string; // YYYY-MM-DD
+};
+
+type RoadmapContextType = {
+  goals: RoadmapGoal[];
+  loading: boolean;
+  progress: ProgressSnapshot;
+  xpEvents: XpEvent[];
+  weeklyReviews: WeeklyReviewEntry[];
+  createGoal: (payload: {
+    title: string;
+    description?: string;
+    domain: GoalDomain;
+    tasks: RoadmapTask[];
+  }) => Promise<RoadmapGoal>;
+  getGoalById: (goalId: string) => RoadmapGoal | undefined;
+  markOneTimeTaskDone: (goalId: string, taskId: string) => Promise<TaskCompletionResult>;
+  addHabitCompletion: (goalId: string, taskId: string) => Promise<TaskCompletionResult>;
+  awardCustomHabitXp: (input: CustomHabitXpInput) => Promise<TaskCompletionResult>;
+  removeGoal: (goalId: string) => Promise<void>;
+  submitWeeklyReview: (input: WeeklyReviewInput) => Promise<WeeklyReviewResult>;
+  getWeeklyReviewForCurrentWeek: () => WeeklyReviewEntry | undefined;
+};
+
+const RoadmapContext = createContext<RoadmapContextType | undefined>(undefined);
+
+function clamp(raw: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, raw));
+}
+
+function normalizeTaskTree(tasks: RoadmapTask[]): RoadmapTask[] {
+  const normalized = tasks.map((task) => ({
+    ...task,
+    impact: clamp(Number(task.impact) || 3, 1, 5),
+    difficulty: clamp(Number(task.difficulty) || 2, 1, 3),
+    dependencies: Array.isArray(task.dependencies)
+      ? task.dependencies.filter((item) => typeof item === "string")
+      : [],
+    children: normalizeTaskTree(task.children ?? []),
+  }));
+
+  const idSet = new Set(flattenTasks(normalized).map((task) => task.id));
+
+  const collectDescendantIds = (task: RoadmapTask): Set<string> => {
+    const ids = new Set<string>();
+    const walk = (node: RoadmapTask) => {
+      for (const child of node.children) {
+        ids.add(child.id);
+        walk(child);
+      }
+    };
+    walk(task);
+    return ids;
+  };
+
+  const sanitizeDependencies = (task: RoadmapTask, ancestorIds: string[] = []): RoadmapTask => {
+    const descendantIds = collectDescendantIds(task);
+    return {
+      ...task,
+      dependencies: [
+        ...new Set(
+          task.dependencies.filter(
+            (depId) =>
+              depId !== task.id &&
+              idSet.has(depId) &&
+              !ancestorIds.includes(depId) &&
+              !descendantIds.has(depId),
+          ),
+        ),
+      ],
+      children: task.children.map((child) => sanitizeDependencies(child, [...ancestorIds, task.id])),
+    };
+  };
+
+  return normalized.map((task) => sanitizeDependencies(task));
+}
+
+function updateTaskById(
+  tasks: RoadmapTask[],
+  taskId: string,
+  updater: (task: RoadmapTask) => RoadmapTask,
+): RoadmapTask[] {
+  return tasks.map((task) => {
+    if (task.id === taskId) {
+      return updater(task);
+    }
+
+    if (task.children.length === 0) {
+      return task;
+    }
+
+    return {
+      ...task,
+      children: updateTaskById(task.children, taskId, updater),
+    };
+  });
+}
+
+function calculateTaskXp(task: RoadmapTask, dependentsCount: number) {
+  const impact = clamp(task.impact, 1, 5);
+  const difficulty = clamp(task.difficulty, 1, 3);
+  const base = task.kind === "one_time" ? 24 : 12;
+  const difficultyMultiplier = 1 + (difficulty - 1) * 0.35;
+  const criticalMultiplier = dependentsCount > 0 ? 1.2 : 1;
+  return Math.max(8, Math.round(base * impact * difficultyMultiplier * criticalMultiplier));
+}
+
+function calculateCustomHabitXp(impactRaw: number, difficultyRaw: number) {
+  const impact = clamp(impactRaw, 1, 5);
+  const difficulty = clamp(difficultyRaw, 1, 3);
+  const base = 12;
+  const difficultyMultiplier = 1 + (difficulty - 1) * 0.35;
+  return Math.max(8, Math.round(base * impact * difficultyMultiplier));
+}
+
+function calculateWeeklyReviewXp(input: WeeklyReviewInput) {
+  const consistency = clamp(Number(input.consistencyScore) || 1, 1, 5);
+  const reflectionBonus = input.wins.trim().length >= 15 ? 8 : 4;
+  const blockerBonus = input.blockers.trim().length >= 15 ? 8 : 4;
+  const planBonus = input.nextPlan.trim().length >= 15 ? 8 : 4;
+  return 18 + consistency * 6 + reflectionBonus + blockerBonus + planBonus;
+}
+
+export function RoadmapProvider({ children }: { children: React.ReactNode }) {
+  const [goals, setGoals] = useState<RoadmapGoal[]>([]);
+  const [xpEvents, setXpEvents] = useState<XpEvent[]>([]);
+  const [weeklyReviews, setWeeklyReviews] = useState<WeeklyReviewEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const [storedGoals, storedXpEvents, storedReviews] = await Promise.all([
+        getRoadmapGoals(),
+        getXpEvents(),
+        getWeeklyReviews(),
+      ]);
+      setGoals(storedGoals);
+      setXpEvents(storedXpEvents);
+      setWeeklyReviews(storedReviews);
+      setLoading(false);
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (loading) return;
+    void saveRoadmapGoals(goals);
+  }, [goals, loading]);
+
+  useEffect(() => {
+    if (loading) return;
+    void saveXpEvents(xpEvents);
+  }, [xpEvents, loading]);
+
+  useEffect(() => {
+    if (loading) return;
+    void saveWeeklyReviews(weeklyReviews);
+  }, [weeklyReviews, loading]);
+
+  const progress = useMemo(() => buildProgressSnapshot(xpEvents), [xpEvents]);
+
+  const value = useMemo<RoadmapContextType>(
+    () => ({
+      goals,
+      loading,
+      progress,
+      xpEvents,
+      weeklyReviews,
+      createGoal: async ({ title, description, domain, tasks }) => {
+        const now = new Date().toISOString();
+        const normalizedTasks = normalizeTaskTree(tasks);
+
+        if (hasDependencyCycle(normalizedTasks)) {
+          throw new Error("Taski zawierają cykl zależności. Popraw zależności i zapisz ponownie.");
+        }
+
+        const goal: RoadmapGoal = {
+          id: buildId("goal"),
+          title: title.trim(),
+          description: description?.trim(),
+          domain,
+          createdAt: now,
+          updatedAt: now,
+          tasks: normalizedTasks,
+        };
+
+        setGoals((prev) => [goal, ...prev]);
+        return goal;
+      },
+      getGoalById: (goalId) => goals.find((g) => g.id === goalId),
+      markOneTimeTaskDone: async (goalId, taskId) => {
+        const goal = goals.find((item) => item.id === goalId);
+        if (!goal) return { ok: false, xpAwarded: 0, reason: "Nie znaleziono celu." };
+
+        const taskMap = buildTaskMap(goal.tasks);
+        const task = taskMap[taskId];
+        if (!task || task.kind !== "one_time") {
+          return { ok: false, xpAwarded: 0, reason: "Nieprawidłowy task." };
+        }
+
+        if (task.status === "done") {
+          return { ok: false, xpAwarded: 0, reason: "Task jest już ukończony." };
+        }
+
+        if (isTaskBlocked(task, taskMap)) {
+          return { ok: false, xpAwarded: 0, reason: "Task jest zablokowany przez zależności." };
+        }
+
+        const now = new Date().toISOString();
+        const dependentsCount = buildDependentsCountMap(goal.tasks)[task.id] ?? 0;
+        const xpAwarded = calculateTaskXp(task, dependentsCount);
+        const sourceKey = `task_one_time:${goal.id}:${task.id}`;
+
+        setGoals((prev) =>
+          prev.map((currentGoal) => {
+            if (currentGoal.id !== goal.id) return currentGoal;
+            return {
+              ...currentGoal,
+              updatedAt: now,
+              tasks: updateTaskById(currentGoal.tasks, task.id, (currentTask) => ({
+                ...currentTask,
+                status: "done",
+              })),
+            };
+          }),
+        );
+
+        let xpAdded = false;
+        setXpEvents((prev) => {
+          if (prev.some((event) => event.sourceKey === sourceKey)) return prev;
+          xpAdded = true;
+          return [
+            {
+              id: buildId("xp"),
+              createdAt: now,
+              domain: goal.domain,
+              sourceType: "task_one_time",
+              sourceKey,
+              xp: xpAwarded,
+              goalId: goal.id,
+              taskId: task.id,
+              meta: {
+                impact: task.impact,
+                difficulty: task.difficulty,
+                critical: dependentsCount > 0,
+              },
+            },
+            ...prev,
+          ];
+        });
+
+        return { ok: true, xpAwarded: xpAdded ? xpAwarded : 0 };
+      },
+      addHabitCompletion: async (goalId, taskId) => {
+        const goal = goals.find((item) => item.id === goalId);
+        if (!goal) return { ok: false, xpAwarded: 0, reason: "Nie znaleziono celu." };
+
+        const taskMap = buildTaskMap(goal.tasks);
+        const task = taskMap[taskId];
+        if (!task || task.kind !== "habit" || !task.habit) {
+          return { ok: false, xpAwarded: 0, reason: "Nieprawidłowy nawyk." };
+        }
+
+        if (isTaskBlocked(task, taskMap)) {
+          return { ok: false, xpAwarded: 0, reason: "Nawyk jest zablokowany przez zależności." };
+        }
+
+        const today = todayIsoDate();
+        if (
+          !isHabitDueOnDate({
+            startDate: task.habit.startDate,
+            everyNDays: task.habit.everyNDays,
+            durationDays: task.habit.durationDays,
+            date: today,
+          })
+        ) {
+          return { ok: false, xpAwarded: 0, reason: "Ten nawyk nie jest dziś wymagany." };
+        }
+
+        if (isCompletionOnDate(task.habit.completions, today)) {
+          return { ok: false, xpAwarded: 0, reason: "Dzisiejsze wykonanie już zostało zapisane." };
+        }
+
+        const now = new Date().toISOString();
+        const dependentsCount = buildDependentsCountMap(goal.tasks)[task.id] ?? 0;
+        const xpAwarded = calculateTaskXp(task, dependentsCount);
+        const sourceKey = `task_habit:${goal.id}:${task.id}:${today}`;
+
+        setGoals((prev) =>
+          prev.map((currentGoal) => {
+            if (currentGoal.id !== goal.id) return currentGoal;
+            return {
+              ...currentGoal,
+              updatedAt: now,
+              tasks: updateTaskById(currentGoal.tasks, task.id, (currentTask) => {
+                if (currentTask.kind !== "habit" || !currentTask.habit) return currentTask;
+                const updatedHabit = {
+                  ...currentTask.habit,
+                  completions: [...currentTask.habit.completions, now],
+                };
+                return {
+                  ...currentTask,
+                  habit: updatedHabit,
+                  status: taskIsDone({ ...currentTask, habit: updatedHabit }) ? "done" : "todo",
+                };
+              }),
+            };
+          }),
+        );
+
+        let xpAdded = false;
+        setXpEvents((prev) => {
+          if (prev.some((event) => event.sourceKey === sourceKey)) return prev;
+          xpAdded = true;
+          return [
+            {
+              id: buildId("xp"),
+              createdAt: now,
+              domain: goal.domain,
+              sourceType: "task_habit",
+              sourceKey,
+              xp: xpAwarded,
+              goalId: goal.id,
+              taskId: task.id,
+              meta: {
+                impact: task.impact,
+                difficulty: task.difficulty,
+                critical: dependentsCount > 0,
+              },
+            },
+            ...prev,
+          ];
+        });
+
+        return { ok: true, xpAwarded: xpAdded ? xpAwarded : 0 };
+      },
+      awardCustomHabitXp: async (input) => {
+        const now = new Date().toISOString();
+        const sourceKey = `custom_habit:${input.habitId}:${input.date}`;
+        const xpAwarded = calculateCustomHabitXp(input.impact, input.difficulty);
+
+        let xpAdded = false;
+        setXpEvents((prev) => {
+          if (prev.some((event) => event.sourceKey === sourceKey)) return prev;
+          xpAdded = true;
+          return [
+            {
+              id: buildId("xp"),
+              createdAt: now,
+              domain: input.domain,
+              sourceType: "custom_habit",
+              sourceKey,
+              xp: xpAwarded,
+              meta: {
+                impact: clamp(input.impact, 1, 5),
+                difficulty: clamp(input.difficulty, 1, 3),
+                critical: false,
+              },
+            },
+            ...prev,
+          ];
+        });
+
+        return { ok: true, xpAwarded: xpAdded ? xpAwarded : 0 };
+      },
+      removeGoal: async (goalId) => {
+        setGoals((prev) => prev.filter((goal) => goal.id !== goalId));
+      },
+      submitWeeklyReview: async (input) => {
+        const now = new Date().toISOString();
+        const weekKey = getWeekKey(now);
+        const normalizedInput: WeeklyReviewInput = {
+          wins: input.wins.trim(),
+          blockers: input.blockers.trim(),
+          nextPlan: input.nextPlan.trim(),
+          consistencyScore: clamp(Number(input.consistencyScore) || 1, 1, 5),
+          focusDomain: input.focusDomain,
+        };
+        const proposedXp = calculateWeeklyReviewXp(normalizedInput);
+        const sourceKey = `weekly_review:${weekKey}`;
+        const alreadyAwardedForWeek = xpEvents.some((event) => event.sourceKey === sourceKey);
+        const xpAwarded = alreadyAwardedForWeek ? 0 : proposedXp;
+
+        const entry: WeeklyReviewEntry = {
+          id: buildId("review"),
+          createdAt: now,
+          weekKey,
+          xpAwarded,
+          ...normalizedInput,
+        };
+
+        setWeeklyReviews((prev) => [entry, ...prev.filter((review) => review.weekKey !== weekKey)]);
+
+        if (!alreadyAwardedForWeek) {
+          setXpEvents((prev) => [
+            {
+              id: buildId("xp"),
+              createdAt: now,
+              domain: normalizedInput.focusDomain,
+              sourceType: "weekly_review",
+              sourceKey,
+              xp: xpAwarded,
+              meta: {
+                difficulty: normalizedInput.consistencyScore,
+              },
+            },
+            ...prev,
+          ]);
+        }
+
+        return {
+          entry,
+          xpAwarded,
+          alreadyAwardedForWeek,
+        };
+      },
+      getWeeklyReviewForCurrentWeek: () => {
+        const weekKey = getWeekKey();
+        return weeklyReviews.find((review) => review.weekKey === weekKey);
+      },
+    }),
+    [goals, loading, progress, weeklyReviews, xpEvents],
+  );
+
+  return <RoadmapContext.Provider value={value}>{children}</RoadmapContext.Provider>;
+}
+
+export function useRoadmaps() {
+  const ctx = useContext(RoadmapContext);
+  if (!ctx) throw new Error("useRoadmaps must be used inside RoadmapProvider");
+  return ctx;
+}
+
+export function getBlockingTaskTitles(tasks: RoadmapTask[], targetTaskId: string) {
+  const taskMap = buildTaskMap(tasks);
+  const target = taskMap[targetTaskId];
+  if (!target) return [];
+  return getBlockedByTaskIds(target, taskMap).map((dependencyId) => taskMap[dependencyId]?.title ?? dependencyId);
+}
