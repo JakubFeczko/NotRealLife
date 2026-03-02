@@ -258,7 +258,7 @@ export default function CreateRoadmapScreen() {
             <Text style={styles.ghostText}>← Wróć</Text>
           </Pressable>
           <Pressable onPress={goToDependenciesStep} style={styles.primaryBtnSmall}>
-            <Text style={styles.primaryBtnSmallText}>Dalej: zależności</Text>
+            <Text style={styles.primaryBtnSmallText}>Ustal zależności</Text>
           </Pressable>
         </View>
       </View>
@@ -372,7 +372,9 @@ function TaskEditor({
   return (
     <View style={[styles.taskCard, level > 0 && styles.subtaskCard]}>
       <View style={styles.taskHeader}>
-        <Text style={styles.taskHeading}>{level === 0 ? "Task" : "Podtask"}</Text>
+        <Text style={[styles.taskHeading, level > 0 && styles.subtaskHeading]}>
+          {level === 0 ? "Task" : "Podtask"}
+        </Text>
         <Pressable onPress={() => onDelete(task.id)}>
           <Text style={styles.deleteText}>Usuń</Text>
         </Pressable>
@@ -675,17 +677,20 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#1F3A61",
     borderRadius: 16,
-    backgroundColor: "#0B1729",
+    backgroundColor: "#0A1628",
     padding: 12,
   },
   subtaskCard: {
     marginTop: 10,
     marginLeft: 8,
-    borderColor: "#1F3A61",
-    backgroundColor: "#0E1C2F",
+    borderColor: "#2E5784",
+    borderLeftWidth: 2,
+    borderLeftColor: "#62B6F4",
+    backgroundColor: "#11243D",
   },
   taskHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   taskHeading: { fontSize: 13, fontWeight: "800", color: "#BEE6FF" },
+  subtaskHeading: { color: "#EAF5FF" },
   deleteText: { fontSize: 12, fontWeight: "800", color: "#C63B3B" },
   kindRow: { marginTop: 10, flexDirection: "row", gap: 8, flexWrap: "wrap" },
   kindBtn: {

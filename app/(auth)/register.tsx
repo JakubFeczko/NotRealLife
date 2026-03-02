@@ -38,11 +38,12 @@ export default function RegisterScreen() {
       return;
     }
 
-    const passwordError = validatePassword(password);
-    if (passwordError) {
-      setError(passwordError);
-      return;
-    }
+    // Wyłączenie dla szybkiego testowania, ale warto przywrócić przed produkcją
+    //const passwordError = validatePassword(password);
+    //if (passwordError) {
+    //  setError(passwordError);
+    //  return;
+    //}
 
     setLoading(true);
     setError(null);

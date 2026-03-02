@@ -32,11 +32,24 @@ export default function LoginScreen() {
     setLoading(true);
     setError(null);
 
-    const err = await signIn(loginOrEmail.trim(), password);
+    const result = await signIn(loginOrEmail.trim(), password);
     setLoading(false);
 
-    if (err) {
-      setError(err);
+    if (result.error) {
+      setError(result.error);
+      return;
+    }
+
+    if (result.requiresVerification) {
+      if (!result.verificationEmail) {
+        setError("Konto wymaga potwierdzenia e-mail. Zaloguj się adresem e-mail, aby wpisać kod.");
+        return;
+      }
+
+      router.push({
+        pathname: "/(auth)/verify",
+        params: { email: result.verificationEmail },
+      });
       return;
     }
 

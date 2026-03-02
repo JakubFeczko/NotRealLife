@@ -20,7 +20,14 @@ type AuthContextType = {
   isLoggedIn: boolean;
   hasCompletedOnboarding: boolean;
 
-  signIn: (loginOrEmail: string, password: string) => Promise<string | null>;
+  signIn: (
+    loginOrEmail: string,
+    password: string,
+  ) => Promise<{
+    error: string | null;
+    requiresVerification?: boolean;
+    verificationEmail?: string;
+  }>;
   signUp: (
     email: string,
     login: string,
@@ -75,12 +82,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signIn = async (loginOrEmail: string, password: string) => {
     try {
       const normalizedIdentifier = loginOrEmail.trim();
-      const { access_token, refresh_token } = await loginRequest(
+      const loginResult = await loginRequest(
         normalizedIdentifier,
         password,
       );
-
-      await saveTokens(access_token, refresh_token);
 
       const previousIdentity = await getIdentity();
       const isEmail = normalizedIdentifier.includes("@");
@@ -98,12 +103,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       await saveIdentity(nextIdentity);
-      setIsLoggedIn(true);
       setIdentity(nextIdentity);
 
-      return null;
+      if (loginResult.isAuthorized === false) {
+        await clearTokens();
+        setIsLoggedIn(false);
+        return {
+          error: null,
+          requiresVerification: true,
+          verificationEmail: nextIdentity.email,
+        };
+      }
+
+      if (!loginResult.access_token || !loginResult.refresh_token) {
+        throw new Error("Nieprawidłowa odpowiedź logowania.");
+      }
+
+      await saveTokens(loginResult.access_token, loginResult.refresh_token);
+      setIsLoggedIn(true);
+      return { error: null };
     } catch (e) {
-      return e instanceof Error ? e.message : "Błąd logowania";
+      return { error: e instanceof Error ? e.message : "Błąd logowania" };
     }
   };
 

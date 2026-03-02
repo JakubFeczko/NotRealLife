@@ -198,7 +198,9 @@ function TaskNode({
   return (
     <View style={[styles.taskCard, level > 0 && styles.subtaskCard]}>
       <View style={styles.taskHeader}>
-        <Text style={[styles.taskTitle, done && styles.doneTitle]}>{task.title}</Text>
+        <Text style={[styles.taskTitle, level > 0 && styles.subtaskTitle, done && styles.doneTitle]}>
+          {task.title}
+        </Text>
         <Text
           style={[
             styles.badge,
@@ -385,18 +387,21 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1,
     borderColor: "#1F3A61",
-    backgroundColor: "#0B1729",
+    backgroundColor: "#0A1628",
     padding: 12,
     gap: 8,
   },
   subtaskCard: {
     marginTop: 8,
     marginLeft: 8,
-    borderColor: "#1F3A61",
-    backgroundColor: "#0E1C2F",
+    borderColor: "#2E5784",
+    borderLeftWidth: 2,
+    borderLeftColor: "#62B6F4",
+    backgroundColor: "#11243D",
   },
   taskHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
   taskTitle: { flex: 1, fontSize: 14, fontWeight: "800", color: "#EAF3FF" },
+  subtaskTitle: { color: "#F0F7FF" },
   doneTitle: { textDecorationLine: "line-through", color: "#A8B9D7" },
   badge: {
     fontSize: 10,

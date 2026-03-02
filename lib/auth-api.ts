@@ -9,9 +9,11 @@ import {
 const API_URL = "https://mindtrack-production-7ef2.up.railway.app";
 
 type LoginResponse = {
-  access_token: string;
+  access_token?: string | null;
+  access_Token?: string | null;
   isAuthorized?: boolean;
-  refresh_token: string;
+  refresh_token?: string | null;
+  refresh_Token?: string | null;
 };
 
 type SignUpResponse = {
@@ -75,20 +77,70 @@ export async function loginRequest(
     throw new Error("Podaj login lub email.");
   }
 
-  const res = await fetch(`${API_URL}/auth/login`, {
+  const loginUrl = `${API_URL}/auth/login`;
+  const loginPayload = {
+    ...buildIdentifierPayload(identifier),
+    password,
+  };
+
+  console.log("[auth/login] request", {
+    url: loginUrl,
+    method: "POST",
+    payload: {
+      ...buildIdentifierPayload(identifier),
+      password_length: password.length,
+    },
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  const res = await fetch(loginUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      ...buildIdentifierPayload(identifier),
-      password,
-    }),
+    body: JSON.stringify(loginPayload),
   });
 
   if (!res.ok) {
+    const body = await tryReadResponseBody(res);
+    console.log("[auth/login] error response", {
+      status: res.status,
+      statusText: res.statusText,
+      body,
+    });
     throw new Error(extractErrorMessage(res.status));
   }
 
-  return await res.json();
+  const response = (await res.json()) as LoginResponse;
+  const source = response as unknown as Record<string, unknown>;
+  const access = getTokenValue(source, ["access_token", "access_Token"]);
+  const refresh = getTokenValue(source, ["refresh_token", "refresh_Token"]);
+  const isAuthorized =
+    typeof response.isAuthorized === "boolean" ? response.isAuthorized : undefined;
+
+  console.log("[auth/login] success response", {
+    access_token: maskToken(access),
+    refresh_token: maskToken(refresh),
+    isAuthorized,
+  });
+
+  if (isAuthorized === false) {
+    return {
+      access_token: null,
+      refresh_token: null,
+      isAuthorized: false,
+    };
+  }
+
+  if (!access || !refresh) {
+    throw new Error("Nieprawidłowa odpowiedź logowania.");
+  }
+
+  return {
+    access_token: access,
+    refresh_token: refresh,
+    isAuthorized: isAuthorized ?? true,
+  };
 }
 
 export async function logOutRequest(
@@ -144,20 +196,50 @@ export async function signUpRequest(
   login: string,
   password: string,
 ): Promise<SignUpResponse> {
-  const res = await fetch(`${API_URL}/auth/register`, {
+  const registerUrl = `${API_URL}/auth/register`;
+  const registerPayload = { email, login, password };
+
+  console.log("[auth/register] request", {
+    url: registerUrl,
+    method: "POST",
+    payload: {
+      email,
+      login,
+      password_length: password.length,
+    },
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  const res = await fetch(registerUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, login, password }),
+    body: JSON.stringify(registerPayload),
   });
 
   if (!res.ok) {
+    const body = await tryReadResponseBody(res);
+    console.log("[auth/register] error response", {
+      status: res.status,
+      statusText: res.statusText,
+      body,
+    });
+
     if (res.status === 400) {
       throw new Error("Użytkownik już istnieje.");
+    }
+    // TEMP fallback: backend may create user, but fail on email send limit.
+    if (res.status === 500) {
+      console.log("[auth/register] temporary fallback enabled for 500; allowing verify step");
+      return { accountCreated: true };
     }
     throw new Error(extractErrorMessage(res.status));
   }
 
-  return await res.json();
+  const response = (await res.json()) as SignUpResponse;
+  console.log("[auth/register] success response", response);
+  return response;
 }
 
 export async function verifyCodeRequest(

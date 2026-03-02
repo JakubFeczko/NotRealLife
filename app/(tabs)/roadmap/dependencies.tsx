@@ -345,12 +345,15 @@ export default function RoadmapDependenciesScreen() {
                   key={task.id}
                   style={[
                     styles.taskCard,
+                    task.level > 0 && styles.subtaskCard,
                     { marginLeft: Math.min(task.level * 10, 18) },
                   ]}
                 >
                   <View style={styles.taskHeader}>
-                    <Text style={styles.taskTitle}>{task.title}</Text>
-                    <Text style={styles.kindTag}>
+                    <Text style={[styles.taskTitle, task.level > 0 && styles.subtaskTitle]}>
+                      {task.title}
+                    </Text>
+                    <Text style={[styles.kindTag, task.level > 0 && styles.kindTagSubtask]}>
                       {task.kind === "habit" ? "Nawyk" : "Jednorazowy"}
                     </Text>
                   </View>
@@ -503,8 +506,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#1F3A61",
     borderRadius: 16,
-    backgroundColor: "#0B1729",
+    backgroundColor: "#0A1628",
     padding: 12,
+  },
+  subtaskCard: {
+    borderColor: "#2E5784",
+    borderLeftWidth: 2,
+    borderLeftColor: "#62B6F4",
+    backgroundColor: "#11243D",
   },
   taskHeader: {
     flexDirection: "row",
@@ -513,6 +522,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   taskTitle: { flex: 1, color: "#F2F7FF", fontWeight: "800", fontSize: 14 },
+  subtaskTitle: { color: "#F0F7FF" },
   kindTag: {
     color: "#A8B9D7",
     fontSize: 11,
@@ -524,6 +534,11 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     paddingHorizontal: 8,
     overflow: "hidden",
+  },
+  kindTagSubtask: {
+    backgroundColor: "#0E2038",
+    borderColor: "#2E5784",
+    color: "#D7EAFE",
   },
   label: {
     marginTop: 10,
