@@ -47,6 +47,8 @@ type RefreshResponse = {
   refresh_Token?: string;
 };
 
+let inFlightTokenRefresh: Promise<string | null> | null = null;
+
 function extractErrorMessage(status: number) {
   if (status === 400) return "Niepoprawne dane żądania.";
   if (status === 401) return "Nieprawidłowy login/email lub hasło.";
@@ -467,12 +469,36 @@ export async function refreshTokensFromStorage(): Promise<string | null> {
   return null;
 }
 
+async function refreshTokensForAuthenticatedRequest() {
+  if (!inFlightTokenRefresh) {
+    inFlightTokenRefresh = refreshTokensFromStorage().finally(() => {
+      inFlightTokenRefresh = null;
+    });
+  }
+
+  return inFlightTokenRefresh;
+}
+
 export async function authFetch(
   path: string,
   init: RequestInit = {},
 ): Promise<Response> {
   const endpoint = path.startsWith("http") ? path : `${API_URL}${path}`;
-  const currentAccess = await getAccessToken();
+  const refreshToken = await getRefreshToken();
+  let currentAccess = await getAccessToken();
+
+  // Some backend endpoints do not return 401 for expired access tokens.
+  // Refresh before each authenticated request to avoid sending stale access.
+  if (refreshToken) {
+    try {
+      const refreshedAccess = await refreshTokensForAuthenticatedRequest();
+      if (refreshedAccess) {
+        currentAccess = refreshedAccess;
+      }
+    } catch {
+      // Fallback to the access token currently stored if proactive refresh fails.
+    }
+  }
 
   const baseHeaders = new Headers(init.headers || {});
   if (currentAccess) {
@@ -490,7 +516,7 @@ export async function authFetch(
 
   let newAccess: string | null = null;
   try {
-    newAccess = await refreshTokensFromStorage();
+    newAccess = await refreshTokensForAuthenticatedRequest();
   } catch {
     return firstResponse;
   }

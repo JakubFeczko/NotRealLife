@@ -14,6 +14,20 @@ export type CustomHabit = {
   createdAt: string;
 };
 
+export type TodayTaskItem = {
+  title: string;
+  description?: string;
+  isDoneToday: boolean;
+  timeOfDay?: TimeOfDay;
+};
+
+export type TodayTasksSnapshot = {
+  completedCount: number;
+  remainingCount: number;
+  totalCount: number;
+  tasks: TodayTaskItem[];
+};
+
 export function todayIsoDate() {
   const now = new Date();
   const year = now.getFullYear();

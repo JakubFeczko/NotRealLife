@@ -45,6 +45,16 @@ export type RoadmapGoal = {
   tasks: RoadmapTask[];
 };
 
+export type RoadmapGoalSummary = {
+  id: string;
+  title: string;
+  description?: string;
+  domain?: GoalDomain;
+  numberOfTasks: number;
+  numberOfCompletedTasks: number;
+  updatedAt?: string;
+};
+
 export function buildId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }

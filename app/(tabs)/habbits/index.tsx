@@ -1,65 +1,12 @@
-import React, { useMemo, useState } from "react";
-import {
-  Alert,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import React, { useEffect, useMemo, useState } from "react";
+import { useIsFocused } from "@react-navigation/native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
 import { useHabits } from "@/lib/habit-context";
-import { useRoadmaps } from "@/lib/roadmap-context";
-import { buildTaskMap, flattenTasks, isTaskBlocked, TimeOfDay } from "@/lib/roadmap-types";
-import {
-  isCompletionOnDate,
-  isHabitDueOnDate,
-  todayIsoDate,
-  translateTimeOfDay,
-} from "@/lib/habit-types";
-
-type RoadmapHabitItem = {
-  goalId: string;
-  goalTitle: string;
-  taskId: string;
-  title: string;
-  startDate: string;
-  everyNDays: number;
-  durationDays: number;
-  timeOfDay?: TimeOfDay;
-  completions: string[];
-  blocked: boolean;
-};
+import { translateTimeOfDay } from "@/lib/habit-types";
+import { TimeOfDay } from "@/lib/roadmap-types";
 
 type HabitFilter = "all" | TimeOfDay;
-
-function collectRoadmapHabits(goals: ReturnType<typeof useRoadmaps>["goals"]) {
-  const result: RoadmapHabitItem[] = [];
-
-  for (const goal of goals) {
-    const taskMap = buildTaskMap(goal.tasks);
-    const tasks = flattenTasks(goal.tasks);
-
-    for (const task of tasks) {
-      if (task.kind !== "habit" || !task.habit) continue;
-      result.push({
-        goalId: goal.id,
-        goalTitle: goal.title,
-        taskId: task.id,
-        title: task.title,
-        startDate: task.habit.startDate,
-        everyNDays: task.habit.everyNDays,
-        durationDays: task.habit.durationDays,
-        timeOfDay: task.habit.timeOfDay,
-        completions: task.habit.completions,
-        blocked: isTaskBlocked(task, taskMap),
-      });
-    }
-  }
-
-  return result;
-}
 
 function matchesFilter(timeOfDay: TimeOfDay | undefined, filter: HabitFilter) {
   if (filter === "all") return true;
@@ -68,119 +15,48 @@ function matchesFilter(timeOfDay: TimeOfDay | undefined, filter: HabitFilter) {
 
 export default function HabbitsScreen() {
   const insets = useSafeAreaInsets();
-  const router = useRouter();
-  const { goals, addHabitCompletion, awardCustomHabitXp } = useRoadmaps();
-  const { customHabits, toggleCustomHabitDoneToday } = useHabits();
+  const isFocused = useIsFocused();
+  const { todayTasks, todayTasksLoading, todayTasksError, refreshTodayTasks } = useHabits();
 
   const [filter, setFilter] = useState<HabitFilter>("all");
   const [pendingOnly, setPendingOnly] = useState(false);
-  const today = todayIsoDate();
 
-  const roadmapHabitsToday = useMemo(() => {
-    return collectRoadmapHabits(goals).filter(
-      (habit) =>
-        !habit.blocked &&
-        isHabitDueOnDate({
-          startDate: habit.startDate,
-          everyNDays: habit.everyNDays,
-          durationDays: habit.durationDays,
-          date: today,
-        }),
-    );
-  }, [goals, today]);
-
-  const customHabitsToday = useMemo(() => {
-    return customHabits.filter((habit) =>
-      isHabitDueOnDate({
-        startDate: habit.startDate,
-        everyNDays: habit.everyNDays,
-        durationDays: habit.durationDays,
-        date: today,
-      }),
-    );
-  }, [customHabits, today]);
-
-  const filteredRoadmapHabitsToday = useMemo(
-    () =>
-      roadmapHabitsToday.filter((habit) => {
-        if (!matchesFilter(habit.timeOfDay, filter)) return false;
-        if (!pendingOnly) return true;
-        return !isCompletionOnDate(habit.completions, today);
-      }),
-    [roadmapHabitsToday, filter, pendingOnly, today],
-  );
-
-  const filteredCustomHabitsToday = useMemo(
-    () =>
-      customHabitsToday.filter((habit) => {
-        if (!matchesFilter(habit.timeOfDay, filter)) return false;
-        if (!pendingOnly) return true;
-        return !isCompletionOnDate(habit.completions, today);
-      }),
-    [customHabitsToday, filter, pendingOnly, today],
-  );
-
-  const completedTodayCount = useMemo(() => {
-    const roadmapDone = roadmapHabitsToday.filter((habit) =>
-      isCompletionOnDate(habit.completions, today),
-    ).length;
-    const customDone = customHabitsToday.filter((habit) =>
-      isCompletionOnDate(habit.completions, today),
-    ).length;
-
-    return roadmapDone + customDone;
-  }, [roadmapHabitsToday, customHabitsToday, today]);
-
-  const totalToday = roadmapHabitsToday.length + customHabitsToday.length;
-  const totalVisibleToday = filteredRoadmapHabitsToday.length + filteredCustomHabitsToday.length;
-
-  const handleRoadmapHabitToggle = async (goalId: string, taskId: string, doneToday: boolean) => {
-    if (doneToday) return;
-    const result = await addHabitCompletion(goalId, taskId);
-    if (!result.ok) {
-      Alert.alert("Nie można zapisać wykonania", result.reason ?? "Spróbuj ponownie.");
-      return;
-    }
-    if (result.xpAwarded > 0) {
-      Alert.alert("Nawyk zaliczony", `+${result.xpAwarded} XP`);
-    }
-  };
-
-  const handleCustomHabitToggle = async (habit: (typeof customHabits)[number]) => {
-    const toggle = await toggleCustomHabitDoneToday(habit.id);
-    if (!toggle.ok) {
-      Alert.alert("Błąd", "Nie udało się zaktualizować nawyku.");
-      return;
-    }
-
-    if (!toggle.doneToday) return;
-
-    const xpResult = await awardCustomHabitXp({
-      habitId: habit.id,
-      domain: habit.domain,
-      impact: habit.impact,
-      difficulty: habit.difficulty,
-      date: toggle.date,
+  useEffect(() => {
+    if (!isFocused) return;
+    void refreshTodayTasks().catch(() => {
+      // Error state is handled by context and rendered below.
     });
+    // refreshTodayTasks identity depends on context snapshot; focus-only trigger prevents refetch loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFocused]);
 
-    if (xpResult.xpAwarded > 0) {
-      Alert.alert("Nawyk zaliczony", `+${xpResult.xpAwarded} XP`);
-    }
-  };
+  const filteredTasks = useMemo(() => {
+    return todayTasks.tasks.filter((task) => {
+      if (!matchesFilter(task.timeOfDay, filter)) return false;
+      if (pendingOnly && task.isDoneToday) return false;
+      return true;
+    });
+  }, [filter, pendingOnly, todayTasks.tasks]);
+
+  const visibleCompletedCount = filteredTasks.filter((task) => task.isDoneToday).length;
 
   return (
     <View style={styles.screen}>
       <View style={styles.bgTop} />
       <View style={styles.bgBottom} />
 
-      <View style={[styles.stickyTop, { paddingTop: insets.top + 8 }]}> 
+      <View style={[styles.stickyTop, { paddingTop: insets.top + 8 }]}>
         <View style={styles.topRow}>
           <Text style={styles.brand}>Not Real Life</Text>
           <Pressable
             style={styles.primaryBtnSmall}
-            onPress={() => router.push("/(tabs)/habbits/create")}
+            onPress={() => {
+              void refreshTodayTasks().catch(() => {
+                // Error state is handled by context and rendered below.
+              });
+            }}
           >
-            <Text style={styles.primaryBtnSmallText}>+ Nowy nawyk</Text>
+            <Text style={styles.primaryBtnSmallText}>Odśwież</Text>
           </Pressable>
         </View>
       </View>
@@ -194,17 +70,23 @@ export default function HabbitsScreen() {
         }}
       >
         <Text style={styles.title}>Nawyki na dziś</Text>
-        <Text style={styles.subtitle}>Cele rosną, kiedy dowozisz małe działania codziennie.</Text>
+        <Text style={styles.subtitle}>Jedna lista na dziś. Statusy przychodzą bezpośrednio z backendu.</Text>
 
         <View style={styles.summaryCard}>
           <Text style={styles.summaryLabel}>Dzisiejszy wynik</Text>
           <Text style={styles.summaryValue}>
-            {completedTodayCount} / {totalToday}
+            {todayTasks.completedCount} / {todayTasks.totalCount}
           </Text>
           <Text style={styles.summaryHint}>
-            zaznaczonych nawyków • widoczne teraz: {totalVisibleToday}
+            wykonanych • do domknięcia: {todayTasks.remainingCount}
           </Text>
         </View>
+
+        {todayTasksError ? (
+          <View style={styles.errorCard}>
+            <Text style={styles.errorText}>{todayTasksError}</Text>
+          </View>
+        ) : null}
 
         <SectionCard title="Filtr wyświetlania">
           <View style={styles.chipsRow}>
@@ -212,51 +94,34 @@ export default function HabbitsScreen() {
             <FilterChip selected={filter === "morning"} onPress={() => setFilter("morning")}>Rano</FilterChip>
             <FilterChip selected={filter === "afternoon"} onPress={() => setFilter("afternoon")}>Popołudnie</FilterChip>
             <FilterChip selected={filter === "evening"} onPress={() => setFilter("evening")}>Wieczór</FilterChip>
-            <FilterChip selected={pendingOnly} onPress={() => setPendingOnly((v) => !v)}>
+            <FilterChip selected={pendingOnly} onPress={() => setPendingOnly((value) => !value)}>
               Niewykonane
             </FilterChip>
           </View>
         </SectionCard>
 
-        <SectionCard title="Z roadmapy na dziś">
-          {filteredRoadmapHabitsToday.length === 0 ? (
-            <Text style={styles.emptyText}>Brak nawyków z roadmapy dla wybranego filtra.</Text>
+        <SectionCard title="Dzisiejsza lista">
+          <Text style={styles.sectionMeta}>
+            Widoczne teraz: {filteredTasks.length} • wykonane w filtrze: {visibleCompletedCount}
+          </Text>
+
+          {todayTasksLoading && todayTasks.tasks.length === 0 ? (
+            <Text style={styles.emptyText}>Ładowanie dzisiejszych nawyków...</Text>
+          ) : filteredTasks.length === 0 ? (
+            <Text style={styles.emptyText}>Brak nawyków dla wybranego filtra.</Text>
           ) : (
-            filteredRoadmapHabitsToday.map((habit) => {
-              const doneToday = isCompletionOnDate(habit.completions, today);
+            filteredTasks.map((task, index) => {
+              const subtitleParts = [translateTimeOfDay(task.timeOfDay)];
+              if (task.description) {
+                subtitleParts.push(task.description);
+              }
 
               return (
                 <HabitRow
-                  key={habit.taskId}
-                  title={habit.title}
-                  subtitle={`${habit.goalTitle} • ${translateTimeOfDay(habit.timeOfDay)}`}
-                  done={doneToday}
-                  onToggle={() => {
-                    void handleRoadmapHabitToggle(habit.goalId, habit.taskId, doneToday);
-                  }}
-                  readOnlyWhenDone
-                />
-              );
-            })
-          )}
-        </SectionCard>
-
-        <SectionCard title="Twoje nawyki na dziś">
-          {filteredCustomHabitsToday.length === 0 ? (
-            <Text style={styles.emptyText}>Brak własnych nawyków dla wybranego filtra.</Text>
-          ) : (
-            filteredCustomHabitsToday.map((habit) => {
-              const doneToday = isCompletionOnDate(habit.completions, today);
-
-              return (
-                <HabitRow
-                  key={habit.id}
-                  title={habit.title}
-                  subtitle={`${translateTimeOfDay(habit.timeOfDay)} • co ${habit.everyNDays} dni`}
-                  done={doneToday}
-                  onToggle={() => {
-                    void handleCustomHabitToggle(habit);
-                  }}
+                  key={`${task.title}_${index}`}
+                  title={task.title}
+                  subtitle={subtitleParts.join(" • ")}
+                  done={task.isDoneToday}
                 />
               );
             })
@@ -280,31 +145,21 @@ function HabitRow({
   title,
   subtitle,
   done,
-  onToggle,
-  readOnlyWhenDone = false,
 }: {
   title: string;
   subtitle: string;
   done: boolean;
-  onToggle: () => void;
-  readOnlyWhenDone?: boolean;
 }) {
-  const disabled = readOnlyWhenDone && done;
-
   return (
     <View style={styles.habitRow}>
-      <View style={{ flex: 1 }}>
+      <View style={styles.habitTextWrap}>
         <Text style={[styles.habitTitle, done && styles.habitTitleDone]}>{title}</Text>
         <Text style={styles.habitSubtitle}>{subtitle}</Text>
       </View>
 
-      <Pressable
-        onPress={onToggle}
-        disabled={disabled}
-        style={[styles.checkCircle, done && styles.checkCircleDone, disabled && styles.checkCircleDisabled]}
-      >
+      <View style={[styles.checkCircle, done && styles.checkCircleDone]}>
         <Text style={[styles.checkText, done && styles.checkTextDone]}>{done ? "✓" : ""}</Text>
-      </Pressable>
+      </View>
     </View>
   );
 }
@@ -385,8 +240,23 @@ const styles = StyleSheet.create({
     borderColor: "#1C2C3D",
   },
   summaryLabel: { color: "#C7D0D8", fontSize: 12, fontWeight: "800" },
-  summaryValue: { color: "#FFFFFF", fontSize: 34, lineHeight: 40, fontWeight: "900", marginTop: 2 },
+  summaryValue: {
+    color: "#FFFFFF",
+    fontSize: 34,
+    lineHeight: 40,
+    fontWeight: "900",
+    marginTop: 2,
+  },
   summaryHint: { color: "#D8DFE5", fontSize: 12 },
+  errorCard: {
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    backgroundColor: "#271420",
+    borderWidth: 1,
+    borderColor: "#6A2A3F",
+  },
+  errorText: { color: "#FFB0C2", fontSize: 12, lineHeight: 17, fontWeight: "700" },
   sectionCard: {
     borderRadius: 20,
     padding: 14,
@@ -396,6 +266,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   sectionTitle: { fontSize: 17, fontWeight: "900", color: "#F2F7FF" },
+  sectionMeta: { color: "#8CA9D3", fontSize: 12, fontWeight: "700" },
   emptyText: { color: "#7992BA", fontSize: 13 },
   habitRow: {
     borderWidth: 1,
@@ -407,6 +278,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
   },
+  habitTextWrap: { flex: 1 },
   habitTitle: { fontSize: 14, fontWeight: "800", color: "#EAF3FF" },
   habitTitleDone: { textDecorationLine: "line-through", color: "#7D93BB" },
   habitSubtitle: { marginTop: 3, fontSize: 12, color: "#8CA9D3" },
@@ -424,7 +296,6 @@ const styles = StyleSheet.create({
     borderColor: "#6FD1FF",
     backgroundColor: "#1A3556",
   },
-  checkCircleDisabled: { opacity: 0.8 },
   checkText: { fontSize: 18, fontWeight: "900", color: "#6FD1FF", lineHeight: 20 },
   checkTextDone: { color: "#6FD1FF" },
   chipsRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },

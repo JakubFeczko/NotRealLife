@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useRoadmaps } from "@/lib/roadmap-context";
@@ -21,22 +21,62 @@ export default function RoadmapDetailScreen() {
   const { goalId } = useLocalSearchParams<{ goalId: string }>();
   const {
     getGoalById,
+    refreshGoalById,
     markOneTimeTaskDone,
     addHabitCompletion,
     removeGoal,
     setGoalDraft,
   } = useRoadmaps();
+  const [isRefreshingGoal, setIsRefreshingGoal] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
 
   const goal = goalId ? getGoalById(goalId) : undefined;
   const today = todayIsoDate();
 
+  useEffect(() => {
+    if (!goalId) return;
+    const shouldFetchRemote = /^\d+$/.test(goalId.trim());
+    if (!shouldFetchRemote) return;
+
+    let isActive = true;
+    setIsRefreshingGoal(true);
+    setRefreshError(null);
+
+    void refreshGoalById(goalId).catch((error) => {
+      if (!isActive) return;
+      setRefreshError(error instanceof Error ? error.message : "Unknown error");
+      console.log("[goals/getGoal] refresh failed", {
+        goalId,
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }).finally(() => {
+      if (!isActive) return;
+      setIsRefreshingGoal(false);
+    });
+
+    return () => {
+      isActive = false;
+    };
+    // refreshGoalById identity depends on context snapshot; goalId-only trigger prevents refetch loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [goalId]);
+
   const allTasks = useMemo(() => (goal ? flattenTasks(goal.tasks) : []), [goal]);
   const taskMap = useMemo(() => (goal ? buildTaskMap(goal.tasks) : {}), [goal]);
+
+  if (!goal && isRefreshingGoal) {
+    return (
+      <View style={[styles.screen, styles.center]}>
+        <Text style={styles.emptyTitle}>Ładowanie celu...</Text>
+      </View>
+    );
+  }
 
   if (!goal) {
     return (
       <View style={[styles.screen, styles.center]}>
         <Text style={styles.emptyTitle}>Nie znaleziono celu</Text>
+        {refreshError ? <Text style={styles.emptySub}>{refreshError}</Text> : null}
         <Pressable style={styles.primaryBtn} onPress={() => router.replace("/(tabs)/roadmap")}>
           <Text style={styles.primaryBtnText}>Wróć do listy</Text>
         </Pressable>

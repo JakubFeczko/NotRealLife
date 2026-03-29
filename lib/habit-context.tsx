@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { CustomHabit, isCompletionOnDate, todayIsoDate } from "./habit-types";
+import { useAuth } from "./auth-context";
+import { getTodayTasksRemote } from "./habit-api";
+import { CustomHabit, isCompletionOnDate, TodayTasksSnapshot, todayIsoDate } from "./habit-types";
 import { getCustomHabits, saveCustomHabits } from "./habit-storage";
 
 type ToggleCustomHabitResult = {
@@ -12,15 +14,30 @@ type ToggleCustomHabitResult = {
 type HabitContextType = {
   customHabits: CustomHabit[];
   loading: boolean;
+  todayTasks: TodayTasksSnapshot;
+  todayTasksLoading: boolean;
+  todayTasksError: string | null;
   createCustomHabit: (habit: Omit<CustomHabit, "id" | "createdAt">) => Promise<void>;
   toggleCustomHabitDoneToday: (habitId: string) => Promise<ToggleCustomHabitResult>;
+  refreshTodayTasks: () => Promise<void>;
 };
 
 const HabitContext = createContext<HabitContextType | undefined>(undefined);
 
+const EMPTY_TODAY_TASKS: TodayTasksSnapshot = {
+  completedCount: 0,
+  remainingCount: 0,
+  totalCount: 0,
+  tasks: [],
+};
+
 export function HabitProvider({ children }: { children: React.ReactNode }) {
+  const { isLoggedIn } = useAuth();
   const [customHabits, setCustomHabits] = useState<CustomHabit[]>([]);
   const [loading, setLoading] = useState(true);
+  const [todayTasks, setTodayTasks] = useState<TodayTasksSnapshot>(EMPTY_TODAY_TASKS);
+  const [todayTasksLoading, setTodayTasksLoading] = useState(false);
+  const [todayTasksError, setTodayTasksError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -35,10 +52,47 @@ export function HabitProvider({ children }: { children: React.ReactNode }) {
     void saveCustomHabits(customHabits);
   }, [customHabits, loading]);
 
+  useEffect(() => {
+    if (!isLoggedIn) {
+      setTodayTasks(EMPTY_TODAY_TASKS);
+      setTodayTasksError(null);
+      setTodayTasksLoading(false);
+      return;
+    }
+
+    let isActive = true;
+    setTodayTasksLoading(true);
+    setTodayTasksError(null);
+
+    void getTodayTasksRemote()
+      .then((snapshot) => {
+        if (!isActive) return;
+        setTodayTasks(snapshot);
+      })
+      .catch((error) => {
+        if (!isActive) return;
+        setTodayTasks(EMPTY_TODAY_TASKS);
+        setTodayTasksError(
+          error instanceof Error ? error.message : "Nie udało się pobrać dzisiejszych zadań.",
+        );
+      })
+      .finally(() => {
+        if (!isActive) return;
+        setTodayTasksLoading(false);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [isLoggedIn]);
+
   const value = useMemo<HabitContextType>(
     () => ({
       customHabits,
       loading,
+      todayTasks,
+      todayTasksLoading,
+      todayTasksError,
       createCustomHabit: async (habit) => {
         const newHabit: CustomHabit = {
           ...habit,
@@ -83,8 +137,31 @@ export function HabitProvider({ children }: { children: React.ReactNode }) {
           doneToday: doneTodayAfterToggle,
         };
       },
+      refreshTodayTasks: async () => {
+        if (!isLoggedIn) {
+          setTodayTasks(EMPTY_TODAY_TASKS);
+          setTodayTasksError(null);
+          return;
+        }
+
+        setTodayTasksLoading(true);
+        setTodayTasksError(null);
+
+        try {
+          const snapshot = await getTodayTasksRemote();
+          setTodayTasks(snapshot);
+        } catch (error) {
+          setTodayTasks(EMPTY_TODAY_TASKS);
+          setTodayTasksError(
+            error instanceof Error ? error.message : "Nie udało się pobrać dzisiejszych zadań.",
+          );
+          throw error;
+        } finally {
+          setTodayTasksLoading(false);
+        }
+      },
     }),
-    [customHabits, loading],
+    [customHabits, isLoggedIn, loading, todayTasks, todayTasksError, todayTasksLoading],
   );
 
   return <HabitContext.Provider value={value}>{children}</HabitContext.Provider>;

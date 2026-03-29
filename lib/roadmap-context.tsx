@@ -10,6 +10,7 @@ import {
   hasDependencyCycle,
   isTaskBlocked,
   RoadmapGoal,
+  RoadmapGoalSummary,
   RoadmapTask,
   taskIsDone,
 } from "./roadmap-types";
@@ -28,6 +29,12 @@ import {
   saveWeeklyReviews,
   saveXpEvents,
 } from "./progression-storage";
+import {
+  createGoalRemote,
+  getAllGoalsRemote,
+  getGoalRemote,
+  markOneTimeTaskRemote,
+} from "./roadmap-api";
 
 type TaskCompletionResult = {
   ok: boolean;
@@ -59,6 +66,7 @@ export type RoadmapGoalDraft = {
 
 type RoadmapContextType = {
   goals: RoadmapGoal[];
+  goalSummaries: RoadmapGoalSummary[];
   loading: boolean;
   progress: ProgressSnapshot;
   xpEvents: XpEvent[];
@@ -78,7 +86,9 @@ type RoadmapContextType = {
     domain: GoalDomain;
     tasks: RoadmapTask[];
   }) => Promise<RoadmapGoal>;
+  refreshGoalsList: () => Promise<void>;
   getGoalById: (goalId: string) => RoadmapGoal | undefined;
+  refreshGoalById: (goalId: string) => Promise<void>;
   markOneTimeTaskDone: (goalId: string, taskId: string) => Promise<TaskCompletionResult>;
   addHabitCompletion: (goalId: string, taskId: string) => Promise<TaskCompletionResult>;
   awardCustomHabitXp: (input: CustomHabitXpInput) => Promise<TaskCompletionResult>;
@@ -91,6 +101,46 @@ const RoadmapContext = createContext<RoadmapContextType | undefined>(undefined);
 
 function clamp(raw: number, min: number, max: number) {
   return Math.min(max, Math.max(min, raw));
+}
+
+function isRemoteGoalId(goalId: string) {
+  return /^\d+$/.test(goalId.trim());
+}
+
+function isRemoteTaskId(taskId: string) {
+  return /^\d+$/.test(taskId.trim());
+}
+
+function buildGoalSummary(goal: RoadmapGoal): RoadmapGoalSummary {
+  const allTasks = flattenTasks(goal.tasks);
+  const completedTasks = allTasks.filter((task) => taskIsDone(task)).length;
+
+  return {
+    id: goal.id,
+    title: goal.title,
+    description: goal.description,
+    domain: goal.domain,
+    numberOfTasks: allTasks.length,
+    numberOfCompletedTasks: completedTasks,
+    updatedAt: goal.updatedAt,
+  };
+}
+
+function upsertGoalSummary(
+  summaries: RoadmapGoalSummary[],
+  summary: RoadmapGoalSummary,
+): RoadmapGoalSummary[] {
+  const existingIndex = summaries.findIndex((item) => item.id === summary.id);
+  if (existingIndex < 0) {
+    return [summary, ...summaries];
+  }
+
+  const next = [...summaries];
+  next[existingIndex] = {
+    ...next[existingIndex],
+    ...summary,
+  };
+  return next;
 }
 
 function normalizeTaskTree(tasks: RoadmapTask[]): RoadmapTask[] {
@@ -235,6 +285,7 @@ function calculateWeeklyReviewXp(input: WeeklyReviewInput) {
 
 export function RoadmapProvider({ children }: { children: React.ReactNode }) {
   const [goals, setGoals] = useState<RoadmapGoal[]>([]);
+  const [goalSummaries, setGoalSummaries] = useState<RoadmapGoalSummary[]>([]);
   const [xpEvents, setXpEvents] = useState<XpEvent[]>([]);
   const [weeklyReviews, setWeeklyReviews] = useState<WeeklyReviewEntry[]>([]);
   const [goalDraft, setGoalDraft] = useState<RoadmapGoalDraft | null>(null);
@@ -248,6 +299,7 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
         getWeeklyReviews(),
       ]);
       setGoals(storedGoals);
+      setGoalSummaries(storedGoals.map((goal) => buildGoalSummary(goal)));
       setXpEvents(storedXpEvents);
       setWeeklyReviews(storedReviews);
       setLoading(false);
@@ -274,6 +326,7 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<RoadmapContextType>(
     () => ({
       goals,
+      goalSummaries,
       loading,
       progress,
       xpEvents,
@@ -281,14 +334,22 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
       goalDraft,
       setGoalDraft,
       createGoal: async ({ title, description, domain, tasks }) => {
-        const now = new Date().toISOString();
         const normalizedTasks = normalizeTaskTree(tasks);
 
         if (hasDependencyCycle(normalizedTasks)) {
           throw new Error("Taski zawierają cykl zależności. Popraw zależności i zapisz ponownie.");
         }
 
-        const goal: RoadmapGoal = {
+        const remoteGoal = await createGoalRemote({
+          title: title.trim(),
+          description: description?.trim(),
+          domain,
+          tasks: normalizedTasks,
+        });
+
+        // Fallback: endpoint can return only createGoalSuccess without goal id.
+        const now = new Date().toISOString();
+        const localGoalFallback: RoadmapGoal = {
           id: buildId("goal"),
           title: title.trim(),
           description: description?.trim(),
@@ -297,9 +358,11 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
           updatedAt: now,
           tasks: normalizedTasks,
         };
+        const goalToStore = remoteGoal ?? localGoalFallback;
 
-        setGoals((prev) => [goal, ...prev]);
-        return goal;
+        setGoals((prev) => [goalToStore, ...prev.filter((goal) => goal.id !== goalToStore.id)]);
+        setGoalSummaries((prev) => upsertGoalSummary(prev, buildGoalSummary(goalToStore)));
+        return goalToStore;
       },
       updateGoal: async ({ goalId, title, description, domain, tasks }) => {
         const now = new Date().toISOString();
@@ -330,9 +393,53 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
           throw new Error("Nie znaleziono celu do edycji.");
         }
 
-        return updatedGoal;
+        const goalToUpdate = updatedGoal;
+        setGoalSummaries((prev) => upsertGoalSummary(prev, buildGoalSummary(goalToUpdate)));
+        return goalToUpdate;
+      },
+      refreshGoalsList: async () => {
+        const remoteSummaries = await getAllGoalsRemote();
+        const goalsById = new Map(goals.map((goal) => [goal.id, goal]));
+
+        const mergedRemoteSummaries = remoteSummaries.map((summary) => {
+          const cachedGoal = goalsById.get(summary.id);
+          if (!cachedGoal) return summary;
+
+          return {
+            ...summary,
+            domain: cachedGoal.domain,
+            updatedAt: cachedGoal.updatedAt,
+          };
+        });
+
+        setGoalSummaries(mergedRemoteSummaries);
       },
       getGoalById: (goalId) => goals.find((g) => g.id === goalId),
+      refreshGoalById: async (goalId) => {
+        if (!isRemoteGoalId(goalId)) {
+          return;
+        }
+
+        const remoteGoal = await getGoalRemote(goalId);
+        setGoals((prev) => {
+          const exactIdx = prev.findIndex((goal) => goal.id === remoteGoal.id);
+          if (exactIdx >= 0) {
+            const next = [...prev];
+            next[exactIdx] = remoteGoal;
+            return next;
+          }
+
+          const requestedIdx = prev.findIndex((goal) => goal.id === goalId);
+          if (requestedIdx >= 0) {
+            const next = [...prev];
+            next[requestedIdx] = remoteGoal;
+            return next;
+          }
+
+          return [remoteGoal, ...prev];
+        });
+        setGoalSummaries((prev) => upsertGoalSummary(prev, buildGoalSummary(remoteGoal)));
+      },
       markOneTimeTaskDone: async (goalId, taskId) => {
         const goal = goals.find((item) => item.id === goalId);
         if (!goal) return { ok: false, xpAwarded: 0, reason: "Nie znaleziono celu." };
@@ -349,6 +456,28 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
 
         if (isTaskBlocked(task, taskMap)) {
           return { ok: false, xpAwarded: 0, reason: "Task jest zablokowany przez zależności." };
+        }
+
+        if (isRemoteGoalId(goal.id) && isRemoteTaskId(task.id)) {
+          try {
+            const remoteResult = await markOneTimeTaskRemote(task.id);
+            if (remoteResult.taskMarked === false) {
+              return {
+                ok: false,
+                xpAwarded: 0,
+                reason: "Serwer nie potwierdził zaliczenia taska.",
+              };
+            }
+          } catch (error) {
+            return {
+              ok: false,
+              xpAwarded: 0,
+              reason:
+                error instanceof Error
+                  ? error.message
+                  : "Nie udało się zaliczyć taska na serwerze.",
+            };
+          }
         }
 
         const now = new Date().toISOString();
@@ -368,6 +497,20 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
               })),
             };
           }),
+        );
+        setGoalSummaries((prev) =>
+          prev.map((summary) =>
+            summary.id === goal.id
+              ? {
+                  ...summary,
+                  numberOfCompletedTasks: Math.min(
+                    summary.numberOfTasks,
+                    summary.numberOfCompletedTasks + 1,
+                  ),
+                  updatedAt: now,
+                }
+              : summary,
+          ),
         );
 
         let xpAdded = false;
@@ -430,6 +573,14 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
         const dependentsCount = buildDependentsCountMap(goal.tasks)[task.id] ?? 0;
         const xpAwarded = calculateTaskXp(task, dependentsCount);
         const sourceKey = `task_habit:${goal.id}:${task.id}:${today}`;
+        const nextHabitState = {
+          ...task.habit,
+          completions: [...task.habit.completions, now],
+        };
+        const completesTaskNow = taskIsDone({
+          ...task,
+          habit: nextHabitState,
+        });
 
         setGoals((prev) =>
           prev.map((currentGoal) => {
@@ -452,6 +603,22 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
             };
           }),
         );
+        if (!taskIsDone(task) && completesTaskNow) {
+          setGoalSummaries((prev) =>
+            prev.map((summary) =>
+              summary.id === goal.id
+                ? {
+                    ...summary,
+                    numberOfCompletedTasks: Math.min(
+                      summary.numberOfTasks,
+                      summary.numberOfCompletedTasks + 1,
+                    ),
+                    updatedAt: now,
+                  }
+                : summary,
+            ),
+          );
+        }
 
         let xpAdded = false;
         setXpEvents((prev) => {
@@ -510,6 +677,7 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
       },
       removeGoal: async (goalId) => {
         setGoals((prev) => prev.filter((goal) => goal.id !== goalId));
+        setGoalSummaries((prev) => prev.filter((goal) => goal.id !== goalId));
       },
       submitWeeklyReview: async (input) => {
         const now = new Date().toISOString();
@@ -564,7 +732,7 @@ export function RoadmapProvider({ children }: { children: React.ReactNode }) {
         return weeklyReviews.find((review) => review.weekKey === weekKey);
       },
     }),
-    [goalDraft, goals, loading, progress, weeklyReviews, xpEvents],
+    [goalDraft, goalSummaries, goals, loading, progress, weeklyReviews, xpEvents],
   );
 
   return <RoadmapContext.Provider value={value}>{children}</RoadmapContext.Provider>;

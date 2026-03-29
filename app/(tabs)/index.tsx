@@ -4,17 +4,14 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useRoadmaps } from "@/lib/roadmap-context";
 import { useHabits } from "@/lib/habit-context";
-import { buildTaskMap, flattenTasks, GOAL_DOMAIN_ORDER, isTaskBlocked } from "@/lib/roadmap-types";
-import { isCompletionOnDate, isHabitDueOnDate, todayIsoDate } from "@/lib/habit-types";
+import { flattenTasks, GOAL_DOMAIN_ORDER } from "@/lib/roadmap-types";
 import { DOMAIN_COLORS } from "@/lib/progression-types";
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { goals, progress } = useRoadmaps();
-  const { customHabits, loading: habitsLoading } = useHabits();
-
-  const today = todayIsoDate();
+  const { todayTasks } = useHabits();
 
   const goalStats = useMemo(() => {
     const totalGoals = goals.length;
@@ -22,49 +19,13 @@ export default function HomeScreen() {
     return { totalGoals, totalTasks };
   }, [goals]);
 
-  const habitsToday = useMemo(() => {
-    let roadmapDue = 0;
-    let roadmapDone = 0;
-
-    for (const goal of goals) {
-      const taskMap = buildTaskMap(goal.tasks);
-      for (const task of flattenTasks(goal.tasks)) {
-        if (task.kind !== "habit" || !task.habit) continue;
-        if (isTaskBlocked(task, taskMap)) continue;
-
-        const due = isHabitDueOnDate({
-          startDate: task.habit.startDate,
-          everyNDays: task.habit.everyNDays,
-          durationDays: task.habit.durationDays,
-          date: today,
-        });
-
-        if (!due) continue;
-        roadmapDue += 1;
-        if (isCompletionOnDate(task.habit.completions, today)) roadmapDone += 1;
-      }
-    }
-
-    if (habitsLoading) {
-      return { due: roadmapDue, done: roadmapDone };
-    }
-
-    const customDue = customHabits.filter((habit) =>
-      isHabitDueOnDate({
-        startDate: habit.startDate,
-        everyNDays: habit.everyNDays,
-        durationDays: habit.durationDays,
-        date: today,
-      }),
-    );
-
-    const customDone = customDue.filter((habit) => isCompletionOnDate(habit.completions, today));
-
-    return {
-      due: roadmapDue + customDue.length,
-      done: roadmapDone + customDone.length,
-    };
-  }, [goals, customHabits, habitsLoading, today]);
+  const habitsToday = useMemo(
+    () => ({
+      due: todayTasks.totalCount,
+      done: todayTasks.completedCount,
+    }),
+    [todayTasks.completedCount, todayTasks.totalCount],
+  );
 
   const habitsRemaining = Math.max(habitsToday.due - habitsToday.done, 0);
   const habitsProgress = habitsToday.due === 0 ? 0 : habitsToday.done / habitsToday.due;
